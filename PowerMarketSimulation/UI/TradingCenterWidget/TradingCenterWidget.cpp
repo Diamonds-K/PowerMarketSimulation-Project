@@ -1,6 +1,7 @@
 #include "UI/TradingCenterWidget/TradingCenterWidget.h"
 
 #include "Data/CSVReader/CSVReader.h"
+#include "Data/CSVWriter/CSVWriter.h"
 #include "UI/ConsumerWidget/ConsumerWidget.h"
 #include "UI/GeneratorWidget/GeneratorWidget.h"
 
@@ -214,21 +215,67 @@ QChart *createPiecewiseChart(const Generator &generator, const Consumer &consume
     return chart;
 }
 
-QChart *createQuadraticChart()
+QChart *createQuadraticChart(const Generator &generator,
+                             const Consumer &consumer,
+                             double clearingPrice)
 {
+    const double a = generator.bidSheet().quadraticA();
+    const double b = generator.bidSheet().quadraticB();
+    const double pMin = generator.pMinMw();
+    const double pMax = generator.pMaxMw();
+    const double demandMw = consumer.fixedDemandMw();
+
+    auto *marginalCostSeries = new QLineSeries;
+    marginalCostSeries->setName(QStringLiteral("边际成本曲线"));
+    marginalCostSeries->setPen(QPen(QColor(0, 110, 180), 2));
+
+    constexpr int kSampleCount = 120;
+    for (int i = 0; i <= kSampleCount; ++i) {
+        const double power = pMin + (pMax - pMin) * static_cast<double>(i) / kSampleCount;
+        const double marginalCost = 2.0 * a * power + b;
+        marginalCostSeries->append(power, marginalCost);
+    }
+
+    const double maxPower = std::max(pMax, demandMw);
+    auto *lambdaSeries = new QLineSeries;
+    lambdaSeries->setName(QStringLiteral("统一出清价 λ"));
+    lambdaSeries->setPen(QPen(QColor(220, 140, 30), 2, Qt::DashLine));
+    lambdaSeries->append(0.0, clearingPrice);
+    lambdaSeries->append(maxPower, clearingPrice);
+
+    const double minPrice = std::min(2.0 * a * pMin + b, clearingPrice);
+    const double maxPrice = std::max(2.0 * a * pMax + b, clearingPrice);
+    auto *demandSeries = new QLineSeries;
+    demandSeries->setName(QStringLiteral("需求 QD"));
+    demandSeries->setPen(QPen(QColor(180, 40, 40), 2, Qt::DashLine));
+    demandSeries->append(demandMw, minPrice);
+    demandSeries->append(demandMw, maxPrice);
+
     auto *chart = new QChart;
-    chart->setTitle(QStringLiteral("二次曲线模式：边际成本曲线待扩展"));
+    chart->setTitle(QStringLiteral("二次曲线模式：边际成本与统一出清价"));
+    chart->legend()->setVisible(true);
+    chart->addSeries(marginalCostSeries);
+    chart->addSeries(lambdaSeries);
+    chart->addSeries(demandSeries);
 
     auto *axisX = new QValueAxis;
     axisX->setTitleText(QStringLiteral("电量 (MW)"));
-    axisX->setRange(0.0, 1.0);
+    axisX->setLabelFormat(QStringLiteral("%.0f"));
+    axisX->setRange(0.0, maxPower * 1.05);
 
     auto *axisY = new QValueAxis;
     axisY->setTitleText(QStringLiteral("价格 (元/MWh)"));
-    axisY->setRange(0.0, 1.0);
+    axisY->setLabelFormat(QStringLiteral("%.2f"));
+    axisY->setRange(minPrice * 0.95, maxPrice * 1.05);
 
     chart->addAxis(axisX, Qt::AlignBottom);
     chart->addAxis(axisY, Qt::AlignLeft);
+    marginalCostSeries->attachAxis(axisX);
+    marginalCostSeries->attachAxis(axisY);
+    lambdaSeries->attachAxis(axisX);
+    lambdaSeries->attachAxis(axisY);
+    demandSeries->attachAxis(axisX);
+    demandSeries->attachAxis(axisY);
     return chart;
 }
 
@@ -481,7 +528,9 @@ void TradingCenterWidget::runClearForSlot(int slotIndex)
         qDebug() << "Clearing not feasible:" << QString::fromStdString(result.message());
     }
 
-    chartView_->setChart(quadratic ? createQuadraticChart()
+    chartView_->setChart(quadratic ? createQuadraticChart(generator,
+                                                          consumer,
+                                                          result.clearingPriceYuanPerMwh())
                                    : createPiecewiseChart(generator, consumer));
 }
 
@@ -509,6 +558,7 @@ void TradingCenterWidget::runBatchClearAllPeriods()
     }
 
     const std::vector<TimeSlotResult> results = tradingCenter_.runDayAheadSimulation(inputs);
+    lastResults_ = results;
 
     resultsTable_->setRowCount(static_cast<int>(results.size()));
     for (int row = 0; row < static_cast<int>(results.size()); ++row) {
@@ -547,7 +597,45 @@ void TradingCenterWidget::exportResults()
         QStringLiteral("CSV 文件 (*.csv);;所有文件 (*)"));
 
     if (!filePath.isEmpty()) {
-        qDebug() << "Selected clearing result export path:" << filePath;
+        std::vector<CSVWriter::Row> rows;
+        rows.push_back({
+            "time_slot",
+            "clearing_price_yuan_per_mwh",
+            "clearing_volume_mw",
+            "shortage_mw",
+            "total_payment_yuan",
+            "total_revenue_yuan",
+            "balance_yuan",
+            "status"
+        });
+
+        for (const TimeSlotResult &item : lastResults_) {
+            const MarketResult &market = item.market;
+            const SettlementResult &settlement = item.settlement;
+            rows.push_back({
+                std::to_string(market.timeSlot() + 1),
+                formatNumber(market.clearingPriceYuanPerMwh(), 4).toStdString(),
+                formatNumber(market.clearingVolumeMw(), 4).toStdString(),
+                formatNumber(market.shortageMw(), 4).toStdString(),
+                formatNumber(settlement.totalPaymentYuan(), 4).toStdString(),
+                formatNumber(settlement.totalRevenueYuan(), 4).toStdString(),
+                formatNumber(settlement.balanceYuan(), 6).toStdString(),
+                market.feasible() ? "feasible" : "infeasible"
+            });
+        }
+
+        std::string errorMessage;
+        if (!CSVWriter::write(filePath.toStdString(), rows, errorMessage)) {
+            QMessageBox::warning(this,
+                                 QStringLiteral("导出失败"),
+                                 QString::fromStdString(errorMessage));
+            return;
+        }
+
+        QMessageBox::information(this,
+                                 QStringLiteral("导出成功"),
+                                 QStringLiteral("已导出 %1 个时段的出清结果。")
+                                     .arg(lastResults_.size()));
     }
 }
 

@@ -57,6 +57,7 @@ private:
 
     TradingCenter tradingCenter_;
     bool syncingTimeSlot_ = false;
+    std::vector<TimeSlotResult> lastResults_;
 };
 
 } // namespace pms
