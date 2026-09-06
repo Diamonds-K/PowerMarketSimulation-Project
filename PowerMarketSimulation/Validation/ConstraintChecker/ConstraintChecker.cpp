@@ -26,6 +26,7 @@ ValidationReport ConstraintChecker::checkFeasibility(const MarketInput& input) {
 
     double sumPMin = 0.0;
     double sumPMax = 0.0;
+    // 汇总全部机组的容量上下限。
     for (const auto& generator : input.generators()) {
         sumPMin += generator.pMinMw();
         sumPMax += generator.pMaxMw();
@@ -33,6 +34,7 @@ ValidationReport ConstraintChecker::checkFeasibility(const MarketInput& input) {
 
     if (input.mode() == MarketMode::Quadratic) {
         const double demand = input.totalFixedDemandMw();
+        // 二次模式要求固定需求在总容量范围内。
         if (demand + kEpsilon < sumPMin || demand > sumPMax + kEpsilon) {
             ValidationIssue item;
             item.severity = ValidationIssue::Severity::Error;
@@ -48,6 +50,7 @@ ValidationReport ConstraintChecker::checkFeasibility(const MarketInput& input) {
     }
 
     const double declaredDemand = input.totalDeclaredDemandMw();
+    // 分段模式要求申报需求不低于机组最低出力之和。
     if (declaredDemand + kEpsilon < sumPMin) {
         ValidationIssue item;
         item.severity = ValidationIssue::Severity::Error;

@@ -288,6 +288,7 @@ TradingCenterWidget::TradingCenterWidget(GeneratorWidget *generatorWidget,
       generatorWidget_(generatorWidget),
       consumerWidget_(consumerWidget)
 {
+    // 创建顶部数据准备区、时段控制区、中间图表区和底部结果操作区。
     auto *rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(12, 12, 12, 12);
     rootLayout->setSpacing(10);
@@ -401,6 +402,7 @@ void TradingCenterWidget::connectSignals()
 
 void TradingCenterWidget::importGeneratorParameters()
 {
+    // 弹出文件选择框，读取 CSV 后写入发电侧当前/对应时段。
     const QString filePath = QFileDialog::getOpenFileName(
         this,
         QStringLiteral("导入机组参数"),
@@ -507,6 +509,7 @@ void TradingCenterWidget::runClearForSlot(int slotIndex)
         return;
     }
 
+    // 从界面控件构建当前时段的模型输入，并调用交易中心出清。
     const bool quadratic = modeCombo_->currentIndex() == 1;
     Generator generator = generatorWidget_->buildGenerator(quadratic);
     Consumer consumer = consumerWidget_->buildConsumer(quadratic);
@@ -543,6 +546,7 @@ void TradingCenterWidget::runBatchClearAllPeriods()
     const bool quadratic = modeCombo_->currentIndex() == 1;
     const MarketMode mode = quadratic ? MarketMode::Quadratic : MarketMode::Piecewise;
 
+    // 用 96 个时段的已保存数据分别构建输入。
     std::vector<MarketInput> inputs;
     inputs.reserve(96);
     for (int slot = 0; slot < 96; ++slot) {
@@ -590,6 +594,7 @@ void TradingCenterWidget::runBatchClearAllPeriods()
 
 void TradingCenterWidget::exportResults()
 {
+    // 把最近一次 96 时段仿真结果写成 CSV 文件。
     const QString filePath = QFileDialog::getSaveFileName(
         this,
         QStringLiteral("导出最终出清结果"),

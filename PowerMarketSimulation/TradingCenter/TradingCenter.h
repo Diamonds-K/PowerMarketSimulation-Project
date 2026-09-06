@@ -15,6 +15,7 @@
 
 namespace pms {
 
+// 一个时段的完整仿真结果：原始输入、出清结果、结算结果。
 struct TimeSlotResult {
     MarketInput input;
     MarketResult market;
@@ -25,10 +26,16 @@ class TradingCenter {
 public:
     TradingCenter();
 
+    // 校验单个时段的申报数据。
     ValidationReport submit(const MarketInput& input) const;
+
+    // 先校验，再根据报价模式选择分段或二次出清算法。
     MarketResult clear(const MarketInput& input) const;
+
+    // 根据出清结果计算结算结果。
     SettlementResult settle(const MarketInput& input, const MarketResult& result) const;
 
+    // 一次运行 96 个时段的日前市场仿真。
     std::vector<TimeSlotResult> runDayAheadSimulation(
         const std::vector<MarketInput>& inputs) const;
 

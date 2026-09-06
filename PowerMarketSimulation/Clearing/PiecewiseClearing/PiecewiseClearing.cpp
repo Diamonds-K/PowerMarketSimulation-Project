@@ -24,6 +24,7 @@ MarketResult PiecewiseClearing::clear(const MarketInput& input) {
         return buildFailure(input.timeSlot(), "PiecewiseClearing 只能处理分段报价模式");
     }
 
+    // 每台机组初始出力至少为 Pmin，随后再叠加增量成交。
     std::vector<GeneratorResult> generatorResults;
     generatorResults.reserve(input.generators().size());
     std::vector<double> unitCapacity(input.generators().size(), 0.0);
@@ -49,6 +50,7 @@ MarketResult PiecewiseClearing::clear(const MarketInput& input) {
     }
 
     const double totalDemand = input.totalDeclaredDemandMw();
+    // 用户总申报需求不能低于全部机组的最低出力之和。
     if (totalDemand + kEpsilon < sumPMin) {
         return buildFailure(input.timeSlot(),
                             "用户总申报需求低于 ΣPmin，无法保证所有在线机组最低出力");
@@ -57,6 +59,7 @@ MarketResult PiecewiseClearing::clear(const MarketInput& input) {
     std::vector<SegmentRef> generatorSegments = collectGeneratorSegments(input);
     std::vector<ConsumerRef> consumerSegments = collectConsumerSegments(input);
 
+    // 卖方价格从低到高排列。
     std::sort(generatorSegments.begin(), generatorSegments.end(),
               [](const SegmentRef& lhs, const SegmentRef& rhs) {
                   if (std::fabs(lhs.priceYuanPerMwh - rhs.priceYuanPerMwh) > kEpsilon) {
@@ -68,6 +71,7 @@ MarketResult PiecewiseClearing::clear(const MarketInput& input) {
                   return lhs.segmentNo < rhs.segmentNo;
               });
 
+    // 买方价格从高到低排列。
     std::sort(consumerSegments.begin(), consumerSegments.end(),
               [](const ConsumerRef& lhs, const ConsumerRef& rhs) {
                   if (std::fabs(lhs.priceYuanPerMwh - rhs.priceYuanPerMwh) > kEpsilon) {
@@ -79,6 +83,7 @@ MarketResult PiecewiseClearing::clear(const MarketInput& input) {
                   return lhs.segmentNo < rhs.segmentNo;
               });
 
+    // 双指针撮合：双方报价段都只向前移动，不回退。
     size_t sellIndex = 0;
     size_t buyIndex = 0;
     double matchedIncrementMw = 0.0;
@@ -89,6 +94,7 @@ MarketResult PiecewiseClearing::clear(const MarketInput& input) {
         SegmentRef& sell = generatorSegments[sellIndex];
         ConsumerRef& buy = consumerSegments[buyIndex];
 
+        // 买方价格低于卖方价格时，无法继续成交。
         if (buy.priceYuanPerMwh + kEpsilon < sell.priceYuanPerMwh) {
             break;
         }
@@ -108,6 +114,7 @@ MarketResult PiecewiseClearing::clear(const MarketInput& input) {
             break;
         }
 
+        // 记录成交段、价格和双方剩余量。
         buy.quantityMw -= tradeMw;
         sell.quantityMw -= tradeMw;
         unitCumulative[sell.generatorIndex] += tradeMw;
@@ -133,6 +140,7 @@ MarketResult PiecewiseClearing::clear(const MarketInput& input) {
         }
     }
 
+    // Pmin 电量按用户申报比例分摊到各用户。
     const double totalDeclared = input.totalDeclaredDemandMw();
     if (totalDeclared > kEpsilon) {
         for (size_t i = 0; i < input.consumers().size(); ++i) {
@@ -143,6 +151,7 @@ MarketResult PiecewiseClearing::clear(const MarketInput& input) {
     }
 
     double totalClearedMw = sumPMin + matchedIncrementMw;
+    // 统一出清价取最后成交的发电段价格。
     double clearingPrice = hasTrade ? lastSellPrice : 0.0;
     if (!hasTrade && !generatorSegments.empty()) {
         clearingPrice = generatorSegments.front().priceYuanPerMwh;
