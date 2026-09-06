@@ -280,7 +280,8 @@ TradingCenterWidget::TradingCenterWidget(GeneratorWidget *generatorWidget,
     chartView_ = new QChartView(chart, this);
     chartView_->setRenderHint(QPainter::Antialiasing);
     chartView_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    rootLayout->addWidget(chartView_, 1);
+    chartView_->setMinimumHeight(320);
+    rootLayout->addWidget(chartView_, 3);
 
     auto *resultsGroup = new QGroupBox(QStringLiteral("96 时段出清结果"), this);
     auto *resultsLayout = new QVBoxLayout(resultsGroup);
@@ -298,6 +299,7 @@ TradingCenterWidget::TradingCenterWidget(GeneratorWidget *generatorWidget,
     resultsTable_->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     resultsTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     resultsTable_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    resultsTable_->setMinimumHeight(140);
     resultsLayout->addWidget(resultsTable_);
     rootLayout->addWidget(resultsGroup, 2);
 
