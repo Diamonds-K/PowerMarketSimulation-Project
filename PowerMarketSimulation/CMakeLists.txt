@@ -56,3 +56,9 @@ add_test(NAME SettlementTest COMMAND SettlementTest)
 add_executable(OptimizationTest Test/OptimizationTest/OptimizationTest.cpp)
 target_link_libraries(OptimizationTest PRIVATE pms_core)
 add_test(NAME OptimizationTest COMMAND OptimizationTest)
+
+get_filename_component(PMS_COMPILER_RUNTIME_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
+get_filename_component(PMS_QT_RUNTIME_DIR "${Qt6_DIR}/../../../bin" ABSOLUTE)
+set_tests_properties(ClearingTest SettlementTest OptimizationTest PROPERTIES
+    ENVIRONMENT_MODIFICATION
+        "PATH=path_list_prepend:${PMS_COMPILER_RUNTIME_DIR};PATH=path_list_prepend:${PMS_QT_RUNTIME_DIR}")
