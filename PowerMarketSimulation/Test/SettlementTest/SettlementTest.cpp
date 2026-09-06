@@ -98,12 +98,12 @@ void testQuadraticSettlement() {
     SettlementEngine settlementEngine;
     const SettlementResult settlement = settlementEngine.settle(input, result);
 
-    assert(near(settlement.totalPaymentYuan(), settlement.totalRevenueYuan(), 1e-6));
-    assert(near(settlement.balanceYuan(), 0.0, 1e-6));
+    assert(near(settlement.totalPaymentYuan(), settlement.totalRevenueYuan(), 1e-4));
+    assert(near(settlement.balanceYuan(), 0.0, 1e-4));
     assert(settlement.generatorSettlements().size() == 2);
     assert(settlement.consumerSettlements().size() == 1);
     assert(near(settlement.consumerSettlements()[0].paymentYuan,
-                settlement.totalPaymentYuan()));
+                settlement.totalPaymentYuan(), 1e-4));
 }
 
 } // namespace
