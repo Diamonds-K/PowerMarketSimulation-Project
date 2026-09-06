@@ -3,6 +3,7 @@
 #include "UI/ConsumerWidget/ConsumerWidget.h"
 #include "UI/GeneratorWidget/GeneratorWidget.h"
 
+#include <QAbstractItemView>
 #include <QChart>
 #include <QChartView>
 #include <QColor>
@@ -12,12 +13,15 @@
 #include <QFont>
 #include <QGroupBox>
 #include <QHBoxLayout>
+#include <QHeaderView>
 #include <QLabel>
 #include <QLineSeries>
 #include <QPainter>
 #include <QPen>
 #include <QPushButton>
 #include <QSpinBox>
+#include <QTableWidget>
+#include <QTableWidgetItem>
 #include <QValueAxis>
 #include <QVBoxLayout>
 
@@ -27,6 +31,11 @@
 
 namespace pms {
 namespace {
+
+QString formatNumber(double value, int precision = 2)
+{
+    return QString::number(value, 'f', precision);
+}
 
 double totalQuantityMw(const std::vector<BidSegment> &segments)
 {
@@ -188,6 +197,25 @@ TradingCenterWidget::TradingCenterWidget(GeneratorWidget *generatorWidget,
     chartView_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     rootLayout->addWidget(chartView_, 1);
 
+    auto *resultsGroup = new QGroupBox(QStringLiteral("96 时段出清结果"), this);
+    auto *resultsLayout = new QVBoxLayout(resultsGroup);
+    resultsTable_ = new QTableWidget(0, 8, resultsGroup);
+    resultsTable_->setHorizontalHeaderLabels({
+        QStringLiteral("时段"),
+        QStringLiteral("出清价 (元/MWh)"),
+        QStringLiteral("出清电量 (MW)"),
+        QStringLiteral("缺额 (MW)"),
+        QStringLiteral("总支付 (元)"),
+        QStringLiteral("总收益 (元)"),
+        QStringLiteral("平衡 (元)"),
+        QStringLiteral("状态")
+    });
+    resultsTable_->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    resultsTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    resultsTable_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    resultsLayout->addWidget(resultsTable_);
+    rootLayout->addWidget(resultsGroup, 2);
+
     auto *resultGroup = new QGroupBox(QStringLiteral("出清结果"), this);
     auto *resultLayout = new QVBoxLayout(resultGroup);
     mcpLabel_ = new QLabel(QStringLiteral("统一出清电价 (MCP): 0.00 元/MWh"), resultGroup);
@@ -268,9 +296,27 @@ void TradingCenterWidget::runSinglePeriodClear()
     runClearForSlot(periodSpinBox_->value() - 1);
 }
 
+void TradingCenterWidget::setTimeSlot(int displaySlot)
+{
+    if (displaySlot < 1 || displaySlot > 96) {
+        return;
+    }
+    if (periodSpinBox_->value() == displaySlot) {
+        return;
+    }
+
+    syncingTimeSlot_ = true;
+    periodSpinBox_->setValue(displaySlot);
+    syncingTimeSlot_ = false;
+}
+
 void TradingCenterWidget::onTimeSlotChanged(int timeSlot)
 {
     runClearForSlot(timeSlot - 1);
+
+    if (!syncingTimeSlot_) {
+        emit timeSlotChanged(timeSlot);
+    }
 }
 
 void TradingCenterWidget::runClearForSlot(int slotIndex)
@@ -313,12 +359,11 @@ void TradingCenterWidget::runBatchClearAllPeriods()
     const bool quadratic = modeCombo_->currentIndex() == 1;
     const MarketMode mode = quadratic ? MarketMode::Quadratic : MarketMode::Piecewise;
 
-    Generator generator = generatorWidget_->buildGenerator(quadratic);
-    Consumer consumer = consumerWidget_->buildConsumer(quadratic);
-
     std::vector<MarketInput> inputs;
     inputs.reserve(96);
     for (int slot = 0; slot < 96; ++slot) {
+        Generator generator = generatorWidget_->buildGeneratorForSlot(slot, quadratic);
+        Consumer consumer = consumerWidget_->buildConsumerForSlot(slot, quadratic);
         generator.bidSheet().setTimeSlot(slot);
         consumer.bidSheet().setTimeSlot(slot);
 
@@ -329,6 +374,32 @@ void TradingCenterWidget::runBatchClearAllPeriods()
     }
 
     const std::vector<TimeSlotResult> results = tradingCenter_.runDayAheadSimulation(inputs);
+
+    resultsTable_->setRowCount(static_cast<int>(results.size()));
+    for (int row = 0; row < static_cast<int>(results.size()); ++row) {
+        const TimeSlotResult &item = results[static_cast<std::size_t>(row)];
+        const MarketResult &market = item.market;
+        const SettlementResult &settlement = item.settlement;
+
+        resultsTable_->setItem(row, 0, new QTableWidgetItem(QString::number(row + 1)));
+        resultsTable_->setItem(row, 1,
+            new QTableWidgetItem(formatNumber(market.clearingPriceYuanPerMwh(), 2)));
+        resultsTable_->setItem(row, 2,
+            new QTableWidgetItem(formatNumber(market.clearingVolumeMw(), 2)));
+        resultsTable_->setItem(row, 3,
+            new QTableWidgetItem(formatNumber(market.shortageMw(), 2)));
+        resultsTable_->setItem(row, 4,
+            new QTableWidgetItem(formatNumber(settlement.totalPaymentYuan(), 2)));
+        resultsTable_->setItem(row, 5,
+            new QTableWidgetItem(formatNumber(settlement.totalRevenueYuan(), 2)));
+        resultsTable_->setItem(row, 6,
+            new QTableWidgetItem(formatNumber(settlement.balanceYuan(), 4)));
+        const QString status = market.feasible()
+                                   ? QStringLiteral("成交")
+                                   : QString::fromStdString(market.message());
+        resultsTable_->setItem(row, 7, new QTableWidgetItem(status));
+    }
+
     qDebug() << "Batch clearing finished:" << results.size() << "slots.";
 }
 

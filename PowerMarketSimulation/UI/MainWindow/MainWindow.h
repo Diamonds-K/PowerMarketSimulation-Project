@@ -16,6 +16,9 @@ class MainWindow : public QMainWindow {
 public:
     explicit MainWindow(QWidget* parent = nullptr);
 
+private slots:
+    void syncTimeSlot(int displaySlot);
+
 private:
     QTabWidget* tabs_ = nullptr;
     GeneratorWidget* generatorWidget_ = nullptr;

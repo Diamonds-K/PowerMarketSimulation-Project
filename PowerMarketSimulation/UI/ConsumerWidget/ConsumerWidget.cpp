@@ -17,6 +17,13 @@ namespace pms {
 ConsumerWidget::ConsumerWidget(QWidget *parent)
     : QWidget(parent)
 {
+    for (ConsumerSlotData &slot : slotData_) {
+        slot.segments = {
+            BidSegment(1, 50.0, 260.0),
+            BidSegment(2, 30.0, 240.0)
+        };
+    }
+
     auto *rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(12, 12, 12, 12);
     rootLayout->setSpacing(10);
@@ -55,11 +62,6 @@ ConsumerWidget::ConsumerWidget(QWidget *parent)
     loadTable_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     rootLayout->addWidget(loadTable_, 1);
 
-    loadTable_->setItem(0, 0, new QTableWidgetItem(QStringLiteral("50")));
-    loadTable_->setItem(0, 1, new QTableWidgetItem(QStringLiteral("260")));
-    loadTable_->setItem(1, 0, new QTableWidgetItem(QStringLiteral("30")));
-    loadTable_->setItem(1, 1, new QTableWidgetItem(QStringLiteral("240")));
-
     auto *bottomLayout = new QHBoxLayout;
     submitButton_ = new QPushButton(QStringLiteral("提交负荷申报"), this);
     totalCostLabel_ = new QLabel(QStringLiteral("出清总电费: 0.00 元"), this);
@@ -67,28 +69,131 @@ ConsumerWidget::ConsumerWidget(QWidget *parent)
     bottomLayout->addStretch();
     bottomLayout->addWidget(totalCostLabel_);
     rootLayout->addLayout(bottomLayout);
+
+    loadSlot(0);
+    connectSignals();
+}
+
+void ConsumerWidget::connectSignals()
+{
+    connect(submitButton_, &QPushButton::clicked,
+            this, &ConsumerWidget::submitCurrentSlot);
+    connect(timeSlotSpinBox_, &QSpinBox::valueChanged,
+            this, &ConsumerWidget::onTimeSlotChanged);
+}
+
+void ConsumerWidget::submitCurrentSlot()
+{
+    saveCurrentToSlot(currentSlotIndex_);
+    totalCostLabel_->setText(QStringLiteral("已保存第 %1 时段申报")
+                                 .arg(currentSlotIndex_ + 1));
+}
+
+void ConsumerWidget::setTimeSlot(int displaySlot)
+{
+    if (displaySlot < 1 || displaySlot > 96) {
+        return;
+    }
+    if (timeSlotSpinBox_->value() == displaySlot) {
+        return;
+    }
+
+    syncingTimeSlot_ = true;
+    timeSlotSpinBox_->setValue(displaySlot);
+    syncingTimeSlot_ = false;
+}
+
+void ConsumerWidget::onTimeSlotChanged(int displaySlot)
+{
+    const int newSlot = displaySlot - 1;
+    if (newSlot == currentSlotIndex_) {
+        return;
+    }
+
+    saveCurrentToSlot(currentSlotIndex_);
+    currentSlotIndex_ = newSlot;
+    loadSlot(currentSlotIndex_);
+
+    if (!syncingTimeSlot_) {
+        emit timeSlotChanged(displaySlot);
+    }
+}
+
+void ConsumerWidget::saveCurrentToSlot(int slotIndex)
+{
+    ConsumerSlotData &data = slotData_[static_cast<std::size_t>(slotIndex)];
+    data.id = userCombo_->currentText().trimmed().isEmpty()
+                  ? QStringLiteral("C1")
+                  : userCombo_->currentText().trimmed();
+    data.fixedDemandMw = fixedDemandEdit_->text().toDouble();
+
+    data.segments.clear();
+    for (int row = 0; row < loadTable_->rowCount(); ++row) {
+        const double quantity = cellText(row, 0).toDouble();
+        const double price = cellText(row, 1).toDouble();
+        if (quantity > 0.0 && price >= 0.0) {
+            data.segments.push_back(BidSegment(row + 1, quantity, price));
+        }
+    }
+}
+
+void ConsumerWidget::loadSlot(int slotIndex)
+{
+    const ConsumerSlotData &data = slotData_[static_cast<std::size_t>(slotIndex)];
+    userCombo_->setCurrentText(data.id);
+    fixedDemandEdit_->setText(QString::number(data.fixedDemandMw));
+
+    for (int row = 0; row < loadTable_->rowCount(); ++row) {
+        loadTable_->setItem(row, 0, new QTableWidgetItem(QString()));
+        loadTable_->setItem(row, 1, new QTableWidgetItem(QString()));
+    }
+
+    for (int row = 0; row < static_cast<int>(data.segments.size()); ++row) {
+        if (row >= loadTable_->rowCount()) {
+            break;
+        }
+        loadTable_->setItem(row, 0,
+            new QTableWidgetItem(QString::number(data.segments[static_cast<std::size_t>(row)].quantityMw())));
+        loadTable_->setItem(row, 1,
+            new QTableWidgetItem(QString::number(data.segments[static_cast<std::size_t>(row)].priceYuanPerMwh())));
+    }
 }
 
 Consumer ConsumerWidget::buildConsumer(bool quadratic) const
 {
-    const QString id = userCombo_->currentText().trimmed().isEmpty()
-                           ? QStringLiteral("C1")
-                           : userCombo_->currentText().trimmed();
+    ConsumerSlotData data;
+    data.id = userCombo_->currentText().trimmed().isEmpty()
+                  ? QStringLiteral("C1")
+                  : userCombo_->currentText().trimmed();
+    data.fixedDemandMw = fixedDemandEdit_->text().toDouble();
 
-    Consumer consumer(id.toStdString(), fixedDemandEdit_->text().toDouble());
+    for (int row = 0; row < loadTable_->rowCount(); ++row) {
+        const double quantity = cellText(row, 0).toDouble();
+        const double price = cellText(row, 1).toDouble();
+        if (quantity > 0.0 && price >= 0.0) {
+            data.segments.push_back(BidSegment(row + 1, quantity, price));
+        }
+    }
+    return buildFromData(data, quadratic);
+}
+
+Consumer ConsumerWidget::buildConsumerForSlot(int slotIndex, bool quadratic) const
+{
+    return buildFromData(slotData_[static_cast<std::size_t>(slotIndex)], quadratic);
+}
+
+Consumer ConsumerWidget::buildFromData(const ConsumerSlotData &data, bool quadratic) const
+{
+    Consumer consumer(data.id.toStdString(), data.fixedDemandMw);
 
     BidSheet sheet;
-    sheet.setOwnerId(id.toStdString());
+    sheet.setOwnerId(data.id.toStdString());
     if (quadratic) {
         sheet.setMode(BidSheet::Mode::Quadratic);
     } else {
         sheet.setMode(BidSheet::Mode::Piecewise);
-        for (int row = 0; row < loadTable_->rowCount(); ++row) {
-            const double quantity = cellText(row, 0).toDouble();
-            const double price = cellText(row, 1).toDouble();
-            if (quantity > 0.0 && price >= 0.0) {
-                sheet.addSegment(BidSegment(row + 1, quantity, price));
-            }
+        for (const BidSegment &segment : data.segments) {
+            sheet.addSegment(segment);
         }
     }
 

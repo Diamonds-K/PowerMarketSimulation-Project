@@ -1,4 +1,5 @@
 /build/
+/build_codex/
 /.qtcreator/
 /legacy_old_project/
 *.user

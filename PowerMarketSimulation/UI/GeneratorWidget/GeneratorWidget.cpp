@@ -19,6 +19,14 @@ namespace pms {
 GeneratorWidget::GeneratorWidget(QWidget *parent)
     : QWidget(parent)
 {
+    for (GeneratorSlotData &slot : slotData_) {
+        slot.segments = {
+            BidSegment(1, 20.0, 200.0),
+            BidSegment(2, 30.0, 250.0),
+            BidSegment(3, 30.0, 300.0)
+        };
+    }
+
     auto *rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(12, 12, 12, 12);
     rootLayout->setSpacing(10);
@@ -74,6 +82,7 @@ GeneratorWidget::GeneratorWidget(QWidget *parent)
     bottomLayout->addWidget(revenueLabel_);
     rootLayout->addLayout(bottomLayout);
 
+    loadSlot(0);
     connectSignals();
 }
 
@@ -91,14 +100,6 @@ QWidget *GeneratorWidget::createLadderPage()
     ladderTable_->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     ladderTable_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     layout->addWidget(ladderTable_);
-
-    ladderTable_->setItem(0, 0, new QTableWidgetItem(QStringLiteral("20")));
-    ladderTable_->setItem(0, 1, new QTableWidgetItem(QStringLiteral("200")));
-    ladderTable_->setItem(1, 0, new QTableWidgetItem(QStringLiteral("30")));
-    ladderTable_->setItem(1, 1, new QTableWidgetItem(QStringLiteral("250")));
-    ladderTable_->setItem(2, 0, new QTableWidgetItem(QStringLiteral("30")));
-    ladderTable_->setItem(2, 1, new QTableWidgetItem(QStringLiteral("300")));
-
     return page;
 }
 
@@ -123,9 +124,6 @@ QWidget *GeneratorWidget::createQuadraticPage()
     createParamRow(QStringLiteral("二次项系数 a："), aEdit_);
     createParamRow(QStringLiteral("一次项系数 b："), bEdit_);
     createParamRow(QStringLiteral("常数项系数 c："), cEdit_);
-    aEdit_->setText(QStringLiteral("0.05"));
-    bEdit_->setText(QStringLiteral("10"));
-    cEdit_->setText(QStringLiteral("0"));
     layout->addStretch();
     return page;
 }
@@ -143,33 +141,145 @@ void GeneratorWidget::connectSignals()
             modeStack_->setCurrentIndex(1);
         }
     });
+
+    connect(submitButton_, &QPushButton::clicked,
+            this, &GeneratorWidget::submitCurrentSlot);
+    connect(timeSlotSpinBox_, &QSpinBox::valueChanged,
+            this, &GeneratorWidget::onTimeSlotChanged);
+}
+
+void GeneratorWidget::submitCurrentSlot()
+{
+    saveCurrentToSlot(currentSlotIndex_);
+    outputLabel_->setText(QStringLiteral("已保存第 %1 时段申报")
+                              .arg(currentSlotIndex_ + 1));
+}
+
+void GeneratorWidget::setTimeSlot(int displaySlot)
+{
+    if (displaySlot < 1 || displaySlot > 96) {
+        return;
+    }
+    if (timeSlotSpinBox_->value() == displaySlot) {
+        return;
+    }
+
+    syncingTimeSlot_ = true;
+    timeSlotSpinBox_->setValue(displaySlot);
+    syncingTimeSlot_ = false;
+}
+
+void GeneratorWidget::onTimeSlotChanged(int displaySlot)
+{
+    const int newSlot = displaySlot - 1;
+    if (newSlot == currentSlotIndex_) {
+        return;
+    }
+
+    saveCurrentToSlot(currentSlotIndex_);
+    currentSlotIndex_ = newSlot;
+    loadSlot(currentSlotIndex_);
+
+    if (!syncingTimeSlot_) {
+        emit timeSlotChanged(displaySlot);
+    }
+}
+
+void GeneratorWidget::saveCurrentToSlot(int slotIndex)
+{
+    GeneratorSlotData &data = slotData_[static_cast<std::size_t>(slotIndex)];
+    data.id = unitCombo_->currentText().trimmed().isEmpty()
+                  ? QStringLiteral("G1")
+                  : unitCombo_->currentText().trimmed();
+    data.pMinMw = pMinEdit_->text().toDouble();
+    data.pMaxMw = pMaxEdit_->text().toDouble();
+    data.quadraticMode = quadraticModeRadio_->isChecked();
+    data.quadraticA = aEdit_->text().toDouble();
+    data.quadraticB = bEdit_->text().toDouble();
+    data.quadraticC = cEdit_->text().toDouble();
+
+    data.segments.clear();
+    for (int row = 0; row < ladderTable_->rowCount(); ++row) {
+        const double quantity = cellText(row, 0).toDouble();
+        const double price = cellText(row, 1).toDouble();
+        if (quantity > 0.0 && price >= 0.0) {
+            data.segments.push_back(BidSegment(row + 1, quantity, price));
+        }
+    }
+}
+
+void GeneratorWidget::loadSlot(int slotIndex)
+{
+    const GeneratorSlotData &data = slotData_[static_cast<std::size_t>(slotIndex)];
+    unitCombo_->setCurrentText(data.id);
+    pMinEdit_->setText(QString::number(data.pMinMw));
+    pMaxEdit_->setText(QString::number(data.pMaxMw));
+    aEdit_->setText(QString::number(data.quadraticA));
+    bEdit_->setText(QString::number(data.quadraticB));
+    cEdit_->setText(QString::number(data.quadraticC));
+
+    if (data.quadraticMode) {
+        quadraticModeRadio_->setChecked(true);
+    } else {
+        ladderModeRadio_->setChecked(true);
+    }
+
+    for (int row = 0; row < ladderTable_->rowCount(); ++row) {
+        ladderTable_->setItem(row, 0, new QTableWidgetItem(QString()));
+        ladderTable_->setItem(row, 1, new QTableWidgetItem(QString()));
+    }
+
+    for (int row = 0; row < static_cast<int>(data.segments.size()); ++row) {
+        if (row >= ladderTable_->rowCount()) {
+            break;
+        }
+        ladderTable_->setItem(row, 0,
+            new QTableWidgetItem(QString::number(data.segments[static_cast<std::size_t>(row)].quantityMw())));
+        ladderTable_->setItem(row, 1,
+            new QTableWidgetItem(QString::number(data.segments[static_cast<std::size_t>(row)].priceYuanPerMwh())));
+    }
 }
 
 Generator GeneratorWidget::buildGenerator(bool quadratic) const
 {
-    const QString id = unitCombo_->currentText().trimmed().isEmpty()
-                           ? QStringLiteral("G1")
-                           : unitCombo_->currentText().trimmed();
+    GeneratorSlotData data;
+    data.id = unitCombo_->currentText().trimmed().isEmpty()
+                  ? QStringLiteral("G1")
+                  : unitCombo_->currentText().trimmed();
+    data.pMinMw = pMinEdit_->text().toDouble();
+    data.pMaxMw = pMaxEdit_->text().toDouble();
+    data.quadraticA = aEdit_->text().toDouble();
+    data.quadraticB = bEdit_->text().toDouble();
+    data.quadraticC = cEdit_->text().toDouble();
 
-    Generator generator(id.toStdString(),
-                        pMinEdit_->text().toDouble(),
-                        pMaxEdit_->text().toDouble());
+    for (int row = 0; row < ladderTable_->rowCount(); ++row) {
+        const double quantity = cellText(row, 0).toDouble();
+        const double price = cellText(row, 1).toDouble();
+        if (quantity > 0.0 && price >= 0.0) {
+            data.segments.push_back(BidSegment(row + 1, quantity, price));
+        }
+    }
+    return buildFromData(data, quadratic);
+}
+
+Generator GeneratorWidget::buildGeneratorForSlot(int slotIndex, bool quadratic) const
+{
+    return buildFromData(slotData_[static_cast<std::size_t>(slotIndex)], quadratic);
+}
+
+Generator GeneratorWidget::buildFromData(const GeneratorSlotData &data, bool quadratic) const
+{
+    Generator generator(data.id.toStdString(), data.pMinMw, data.pMaxMw);
 
     BidSheet sheet;
-    sheet.setOwnerId(id.toStdString());
+    sheet.setOwnerId(data.id.toStdString());
     if (quadratic) {
         sheet.setMode(BidSheet::Mode::Quadratic);
-        sheet.setQuadraticCoefficients(aEdit_->text().toDouble(),
-                                       bEdit_->text().toDouble(),
-                                       cEdit_->text().toDouble());
+        sheet.setQuadraticCoefficients(data.quadraticA, data.quadraticB, data.quadraticC);
     } else {
         sheet.setMode(BidSheet::Mode::Piecewise);
-        for (int row = 0; row < ladderTable_->rowCount(); ++row) {
-            const double quantity = cellText(row, 0).toDouble();
-            const double price = cellText(row, 1).toDouble();
-            if (quantity > 0.0 && price >= 0.0) {
-                sheet.addSegment(BidSegment(row + 1, quantity, price));
-            }
+        for (const BidSegment &segment : data.segments) {
+            sheet.addSegment(segment);
         }
     }
 
