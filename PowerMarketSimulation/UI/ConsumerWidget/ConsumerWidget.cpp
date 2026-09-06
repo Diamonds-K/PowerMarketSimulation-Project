@@ -124,6 +124,18 @@ void ConsumerWidget::setCurrentSlotSegments(const std::vector<BidSegment> &segme
     totalCostLabel_->setText(QStringLiteral("已导入 %1 段负荷报价").arg(segments.size()));
 }
 
+void ConsumerWidget::setSlotSegments(int slotIndex, const std::vector<BidSegment> &segments)
+{
+    if (slotIndex < 0 || slotIndex >= 96) {
+        return;
+    }
+
+    slotData_[static_cast<std::size_t>(slotIndex)].segments = segments;
+    if (slotIndex == currentSlotIndex_) {
+        setCurrentSlotSegments(segments);
+    }
+}
+
 void ConsumerWidget::onTimeSlotChanged(int displaySlot)
 {
     const int newSlot = displaySlot - 1;

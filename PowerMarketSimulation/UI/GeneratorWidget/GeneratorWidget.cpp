@@ -190,6 +190,18 @@ void GeneratorWidget::setCurrentSlotSegments(const std::vector<BidSegment> &segm
     outputLabel_->setText(QStringLiteral("已导入 %1 段发电报价").arg(segments.size()));
 }
 
+void GeneratorWidget::setSlotSegments(int slotIndex, const std::vector<BidSegment> &segments)
+{
+    if (slotIndex < 0 || slotIndex >= 96) {
+        return;
+    }
+
+    slotData_[static_cast<std::size_t>(slotIndex)].segments = segments;
+    if (slotIndex == currentSlotIndex_) {
+        setCurrentSlotSegments(segments);
+    }
+}
+
 void GeneratorWidget::onTimeSlotChanged(int displaySlot)
 {
     const int newSlot = displaySlot - 1;

@@ -76,6 +76,52 @@ std::vector<BidSegment> parseSegmentCsv(const QString &filePath,
     return segments;
 }
 
+struct SlotSegments {
+    int timeSlot = 0;
+    std::vector<BidSegment> segments;
+};
+
+std::vector<SlotSegments> parseSlotCsv(const QString &filePath,
+                                       QString &errorMessage)
+{
+    std::vector<SlotSegments> slotGroups;
+    std::vector<CSVReader::Row> rows;
+    std::string readError;
+    if (!CSVReader::read(filePath.toStdString(), rows, readError)) {
+        errorMessage = QString::fromStdString(readError);
+        return slotGroups;
+    }
+
+    for (const CSVReader::Row &row : rows) {
+        if (row.size() < 3) {
+            continue;
+        }
+
+        bool slotOk = false;
+        bool powerOk = false;
+        bool priceOk = false;
+        const int timeSlot = QString::fromStdString(row[0]).toInt(&slotOk);
+        const double power = QString::fromStdString(row[1]).toDouble(&powerOk);
+        const double price = QString::fromStdString(row[2]).toDouble(&priceOk);
+        if (!slotOk || !powerOk || !priceOk) {
+            continue;
+        }
+        if (timeSlot < 1 || timeSlot > 96 || power <= 0.0 || price < 0.0) {
+            continue;
+        }
+
+        SlotSegments group;
+        group.timeSlot = timeSlot;
+        group.segments.push_back(BidSegment(1, power, price));
+        slotGroups.push_back(group);
+    }
+
+    if (slotGroups.empty()) {
+        errorMessage = QStringLiteral("CSV 中没有读取到有效的“时段,电量,价格”数据。");
+    }
+    return slotGroups;
+}
+
 double totalQuantityMw(const std::vector<BidSegment> &segments)
 {
     return std::accumulate(segments.begin(), segments.end(), 0.0,
@@ -314,6 +360,19 @@ void TradingCenterWidget::importGeneratorParameters()
 
     if (!filePath.isEmpty()) {
         QString errorMessage;
+        const std::vector<SlotSegments> slotGroups = parseSlotCsv(filePath, errorMessage);
+        if (!slotGroups.empty()) {
+            for (const SlotSegments &group : slotGroups) {
+                generatorWidget_->setSlotSegments(group.timeSlot - 1, group.segments);
+            }
+            QMessageBox::information(this,
+                                     QStringLiteral("导入成功"),
+                                     QStringLiteral("已导入 %1 个时段的发电报价。")
+                                         .arg(slotGroups.size()));
+            return;
+        }
+
+        errorMessage.clear();
         const std::vector<BidSegment> segments = parseSegmentCsv(filePath, errorMessage);
         if (!errorMessage.isEmpty()) {
             QMessageBox::warning(this, QStringLiteral("导入失败"), errorMessage);
@@ -338,6 +397,19 @@ void TradingCenterWidget::importLoadData()
 
     if (!filePath.isEmpty()) {
         QString errorMessage;
+        const std::vector<SlotSegments> slotGroups = parseSlotCsv(filePath, errorMessage);
+        if (!slotGroups.empty()) {
+            for (const SlotSegments &group : slotGroups) {
+                consumerWidget_->setSlotSegments(group.timeSlot - 1, group.segments);
+            }
+            QMessageBox::information(this,
+                                     QStringLiteral("导入成功"),
+                                     QStringLiteral("已导入 %1 个时段的负荷报价。")
+                                         .arg(slotGroups.size()));
+            return;
+        }
+
+        errorMessage.clear();
         const std::vector<BidSegment> segments = parseSegmentCsv(filePath, errorMessage);
         if (!errorMessage.isEmpty()) {
             QMessageBox::warning(this, QStringLiteral("导入失败"), errorMessage);
