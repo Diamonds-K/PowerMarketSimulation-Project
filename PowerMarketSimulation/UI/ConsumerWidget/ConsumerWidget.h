@@ -4,8 +4,11 @@
 
 #include "Model/Consumer/Consumer.h"
 
+class QComboBox;
+class QLabel;
 class QLineEdit;
 class QPushButton;
+class QSpinBox;
 class QTableWidget;
 
 namespace pms {
@@ -14,21 +17,19 @@ class ConsumerWidget : public QWidget {
     Q_OBJECT
 
 public:
-    explicit ConsumerWidget(QWidget* parent = nullptr);
+    explicit ConsumerWidget(QWidget *parent = nullptr);
 
     Consumer buildConsumer(bool quadratic) const;
-    void clearForm();
-
-private slots:
-    void addSegmentRow();
-    void removeSelectedSegmentRow();
 
 private:
     QString cellText(int row, int column) const;
 
-    QLineEdit* idEdit_ = nullptr;
-    QLineEdit* fixedDemandEdit_ = nullptr;
-    QTableWidget* segmentsTable_ = nullptr;
+    QComboBox *userCombo_ = nullptr;
+    QSpinBox *timeSlotSpinBox_ = nullptr;
+    QLineEdit *fixedDemandEdit_ = nullptr;
+    QTableWidget *loadTable_ = nullptr;
+    QPushButton *submitButton_ = nullptr;
+    QLabel *totalCostLabel_ = nullptr;
 };
 
 } // namespace pms

@@ -8,7 +8,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets Sql)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Sql Charts)
 
 set(PMS_CORE_SOURCES
     Model/BidSegment/BidSegment.cpp
@@ -41,7 +41,7 @@ add_executable(PowerMarketSimulation
     UI/ConsumerWidget/ConsumerWidget.cpp
     UI/TradingCenterWidget/TradingCenterWidget.cpp
 )
-target_link_libraries(PowerMarketSimulation PRIVATE pms_core Qt6::Widgets)
+target_link_libraries(PowerMarketSimulation PRIVATE pms_core Qt6::Widgets Qt6::Charts)
 
 enable_testing()
 

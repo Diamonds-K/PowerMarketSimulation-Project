@@ -1,0 +1,5 @@
+/build/
+/.qtcreator/
+/legacy_old_project/
+*.user
+*.autosave

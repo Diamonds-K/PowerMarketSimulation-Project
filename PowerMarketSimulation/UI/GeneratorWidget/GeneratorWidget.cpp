@@ -1,114 +1,185 @@
 #include "UI/GeneratorWidget/GeneratorWidget.h"
 
-#include <QFormLayout>
+#include <QComboBox>
+#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QRadioButton>
+#include <QSpinBox>
+#include <QStackedWidget>
 #include <QTableWidget>
+#include <QTableWidgetItem>
 #include <QVBoxLayout>
 
 namespace pms {
 
-GeneratorWidget::GeneratorWidget(QWidget* parent)
-    : QWidget(parent) {
-    auto* layout = new QVBoxLayout(this);
+GeneratorWidget::GeneratorWidget(QWidget *parent)
+    : QWidget(parent)
+{
+    auto *rootLayout = new QVBoxLayout(this);
+    rootLayout->setContentsMargins(12, 12, 12, 12);
+    rootLayout->setSpacing(10);
 
-    auto* form = new QFormLayout;
-    idEdit_ = new QLineEdit(QStringLiteral("G1"), this);
-    pMinEdit_ = new QLineEdit(QStringLiteral("20"), this);
-    pMaxEdit_ = new QLineEdit(QStringLiteral("100"), this);
-    quadraticAEdit_ = new QLineEdit(QStringLiteral("0.05"), this);
-    quadraticBEdit_ = new QLineEdit(QStringLiteral("10"), this);
-    quadraticCEdit_ = new QLineEdit(QStringLiteral("0"), this);
+    auto *paramGroup = new QGroupBox(QStringLiteral("机组参数"), this);
+    auto *paramLayout = new QHBoxLayout(paramGroup);
+    paramLayout->addWidget(new QLabel(QStringLiteral("选择机组："), paramGroup));
 
-    form->addRow(QStringLiteral("机组编号"), idEdit_);
-    form->addRow(QStringLiteral("Pmin (MW)"), pMinEdit_);
-    form->addRow(QStringLiteral("Pmax (MW)"), pMaxEdit_);
-    form->addRow(QStringLiteral("二次系数 a"), quadraticAEdit_);
-    form->addRow(QStringLiteral("二次系数 b"), quadraticBEdit_);
-    form->addRow(QStringLiteral("二次系数 c"), quadraticCEdit_);
-    layout->addLayout(form);
+    unitCombo_ = new QComboBox(paramGroup);
+    unitCombo_->setEditable(true);
+    unitCombo_->addItem(QStringLiteral("G1"));
+    paramLayout->addWidget(unitCombo_);
 
-    segmentsTable_ = new QTableWidget(0, 3, this);
-    segmentsTable_->setHorizontalHeaderLabels(
-        {QStringLiteral("段号"), QStringLiteral("电量 (MW)"), QStringLiteral("价格 (元/MWh)")});
-    segmentsTable_->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
-    layout->addWidget(segmentsTable_);
+    paramLayout->addWidget(new QLabel(QStringLiteral("Pmin (MW):"), paramGroup));
+    pMinEdit_ = new QLineEdit(QStringLiteral("20"), paramGroup);
+    paramLayout->addWidget(pMinEdit_);
 
-    auto* buttons = new QHBoxLayout;
-    auto* addButton = new QPushButton(QStringLiteral("增加报价段"), this);
-    auto* removeButton = new QPushButton(QStringLiteral("删除所选段"), this);
-    auto* clearButton = new QPushButton(QStringLiteral("清空"), this);
-    connect(addButton, &QPushButton::clicked, this, &GeneratorWidget::addSegmentRow);
-    connect(removeButton, &QPushButton::clicked, this, &GeneratorWidget::removeSelectedSegmentRow);
-    connect(clearButton, &QPushButton::clicked, this, &GeneratorWidget::clearForm);
-    buttons->addWidget(addButton);
-    buttons->addWidget(removeButton);
-    buttons->addWidget(clearButton);
-    buttons->addStretch();
-    layout->addLayout(buttons);
+    paramLayout->addWidget(new QLabel(QStringLiteral("Pmax (MW):"), paramGroup));
+    pMaxEdit_ = new QLineEdit(QStringLiteral("100"), paramGroup);
+    paramLayout->addWidget(pMaxEdit_);
+    paramLayout->addStretch();
+    rootLayout->addWidget(paramGroup);
 
-    addSegmentRow();
-    addSegmentRow();
-    addSegmentRow();
+    auto *modeGroup = new QGroupBox(QStringLiteral("报价模式与时段"), this);
+    auto *modeLayout = new QHBoxLayout(modeGroup);
+    modeLayout->addWidget(new QLabel(QStringLiteral("当前时段:"), modeGroup));
 
-    segmentsTable_->item(0, 1)->setText(QStringLiteral("20"));
-    segmentsTable_->item(0, 2)->setText(QStringLiteral("200"));
-    segmentsTable_->item(1, 1)->setText(QStringLiteral("30"));
-    segmentsTable_->item(1, 2)->setText(QStringLiteral("250"));
-    segmentsTable_->item(2, 1)->setText(QStringLiteral("30"));
-    segmentsTable_->item(2, 2)->setText(QStringLiteral("300"));
+    timeSlotSpinBox_ = new QSpinBox(modeGroup);
+    timeSlotSpinBox_->setRange(1, 96);
+    timeSlotSpinBox_->setValue(1);
+    modeLayout->addWidget(timeSlotSpinBox_);
+
+    ladderModeRadio_ = new QRadioButton(QStringLiteral("10段阶梯报价"), modeGroup);
+    quadraticModeRadio_ = new QRadioButton(QStringLiteral("二次成本曲线"), modeGroup);
+    ladderModeRadio_->setChecked(true);
+    modeLayout->addWidget(ladderModeRadio_);
+    modeLayout->addWidget(quadraticModeRadio_);
+    modeLayout->addStretch();
+    rootLayout->addWidget(modeGroup);
+
+    modeStack_ = new QStackedWidget(this);
+    modeStack_->addWidget(createLadderPage());
+    modeStack_->addWidget(createQuadraticPage());
+    rootLayout->addWidget(modeStack_, 1);
+
+    auto *bottomLayout = new QHBoxLayout;
+    submitButton_ = new QPushButton(QStringLiteral("提交发电申报"), this);
+    outputLabel_ = new QLabel(QStringLiteral("中标出力: 0.00 MW"), this);
+    revenueLabel_ = new QLabel(QStringLiteral("预估收益: 0.00 元"), this);
+    bottomLayout->addWidget(submitButton_);
+    bottomLayout->addStretch();
+    bottomLayout->addWidget(outputLabel_);
+    bottomLayout->addWidget(revenueLabel_);
+    rootLayout->addLayout(bottomLayout);
+
+    connectSignals();
 }
 
-Generator GeneratorWidget::buildGenerator(bool quadratic) const {
-    Generator generator(idEdit_->text().trimmed().toStdString(),
+QWidget *GeneratorWidget::createLadderPage()
+{
+    auto *page = new QWidget(this);
+    auto *layout = new QVBoxLayout(page);
+    layout->setContentsMargins(0, 0, 0, 0);
+
+    ladderTable_ = new QTableWidget(10, 2, page);
+    ladderTable_->setHorizontalHeaderLabels({
+        QStringLiteral("出力段上限 P (MW)"),
+        QStringLiteral("分段报价 C (元/MWh)")
+    });
+    ladderTable_->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    ladderTable_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    layout->addWidget(ladderTable_);
+
+    ladderTable_->setItem(0, 0, new QTableWidgetItem(QStringLiteral("20")));
+    ladderTable_->setItem(0, 1, new QTableWidgetItem(QStringLiteral("200")));
+    ladderTable_->setItem(1, 0, new QTableWidgetItem(QStringLiteral("30")));
+    ladderTable_->setItem(1, 1, new QTableWidgetItem(QStringLiteral("250")));
+    ladderTable_->setItem(2, 0, new QTableWidgetItem(QStringLiteral("30")));
+    ladderTable_->setItem(2, 1, new QTableWidgetItem(QStringLiteral("300")));
+
+    return page;
+}
+
+QWidget *GeneratorWidget::createQuadraticPage()
+{
+    auto *page = new QWidget(this);
+    auto *layout = new QVBoxLayout(page);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(12);
+
+    auto createParamRow = [this, page, layout](const QString &labelText, QLineEdit *&edit) {
+        auto *rowLayout = new QHBoxLayout;
+        rowLayout->addWidget(new QLabel(labelText, page));
+
+        edit = new QLineEdit(page);
+        edit->setPlaceholderText(QStringLiteral("请输入数值"));
+        edit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        rowLayout->addWidget(edit, 1);
+        layout->addLayout(rowLayout);
+    };
+
+    createParamRow(QStringLiteral("二次项系数 a："), aEdit_);
+    createParamRow(QStringLiteral("一次项系数 b："), bEdit_);
+    createParamRow(QStringLiteral("常数项系数 c："), cEdit_);
+    aEdit_->setText(QStringLiteral("0.05"));
+    bEdit_->setText(QStringLiteral("10"));
+    cEdit_->setText(QStringLiteral("0"));
+    layout->addStretch();
+    return page;
+}
+
+void GeneratorWidget::connectSignals()
+{
+    connect(ladderModeRadio_, &QRadioButton::toggled, this, [this](bool checked) {
+        if (checked) {
+            modeStack_->setCurrentIndex(0);
+        }
+    });
+
+    connect(quadraticModeRadio_, &QRadioButton::toggled, this, [this](bool checked) {
+        if (checked) {
+            modeStack_->setCurrentIndex(1);
+        }
+    });
+}
+
+Generator GeneratorWidget::buildGenerator(bool quadratic) const
+{
+    const QString id = unitCombo_->currentText().trimmed().isEmpty()
+                           ? QStringLiteral("G1")
+                           : unitCombo_->currentText().trimmed();
+
+    Generator generator(id.toStdString(),
                         pMinEdit_->text().toDouble(),
                         pMaxEdit_->text().toDouble());
 
     BidSheet sheet;
-    sheet.setOwnerId(idEdit_->text().trimmed().toStdString());
+    sheet.setOwnerId(id.toStdString());
     if (quadratic) {
         sheet.setMode(BidSheet::Mode::Quadratic);
-        sheet.setQuadraticCoefficients(quadraticAEdit_->text().toDouble(),
-                                       quadraticBEdit_->text().toDouble(),
-                                       quadraticCEdit_->text().toDouble());
+        sheet.setQuadraticCoefficients(aEdit_->text().toDouble(),
+                                       bEdit_->text().toDouble(),
+                                       cEdit_->text().toDouble());
     } else {
         sheet.setMode(BidSheet::Mode::Piecewise);
-        for (int row = 0; row < segmentsTable_->rowCount(); ++row) {
-            const double quantity = cellText(row, 1).toDouble();
-            const double price = cellText(row, 2).toDouble();
-            sheet.addSegment(BidSegment(row + 1, quantity, price));
+        for (int row = 0; row < ladderTable_->rowCount(); ++row) {
+            const double quantity = cellText(row, 0).toDouble();
+            const double price = cellText(row, 1).toDouble();
+            if (quantity > 0.0 && price >= 0.0) {
+                sheet.addSegment(BidSegment(row + 1, quantity, price));
+            }
         }
     }
+
     generator.setBidSheet(sheet);
     return generator;
 }
 
-void GeneratorWidget::clearForm() {
-    segmentsTable_->setRowCount(0);
-    addSegmentRow();
-}
-
-void GeneratorWidget::addSegmentRow() {
-    const int row = segmentsTable_->rowCount();
-    segmentsTable_->insertRow(row);
-    auto* noItem = new QTableWidgetItem(QString::number(row + 1));
-    noItem->setFlags(noItem->flags() & ~Qt::ItemIsEditable);
-    segmentsTable_->setItem(row, 0, noItem);
-    segmentsTable_->setItem(row, 1, new QTableWidgetItem(QStringLiteral("0")));
-    segmentsTable_->setItem(row, 2, new QTableWidgetItem(QStringLiteral("0")));
-}
-
-void GeneratorWidget::removeSelectedSegmentRow() {
-    const int row = segmentsTable_->currentRow();
-    if (row >= 0) {
-        segmentsTable_->removeRow(row);
-    }
-}
-
-QString GeneratorWidget::cellText(int row, int column) const {
-    const QTableWidgetItem* item = segmentsTable_->item(row, column);
+QString GeneratorWidget::cellText(int row, int column) const
+{
+    const QTableWidgetItem *item = ladderTable_->item(row, column);
     return item ? item->text() : QString();
 }
 
