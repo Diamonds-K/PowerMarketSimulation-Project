@@ -1,5 +1,6 @@
 /build/
 /build_codex/
+/build_csv_import/
 /.qtcreator/
 /legacy_old_project/
 *.user

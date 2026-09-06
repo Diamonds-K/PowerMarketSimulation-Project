@@ -39,6 +39,7 @@ public:
     Generator buildGenerator(bool quadratic) const;
     Generator buildGeneratorForSlot(int slotIndex, bool quadratic) const;
     void setTimeSlot(int displaySlot);
+    void setCurrentSlotSegments(const std::vector<BidSegment> &segments);
 
 signals:
     void timeSlotChanged(int displaySlot);

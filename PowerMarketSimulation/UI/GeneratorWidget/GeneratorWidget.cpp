@@ -169,6 +169,27 @@ void GeneratorWidget::setTimeSlot(int displaySlot)
     syncingTimeSlot_ = false;
 }
 
+void GeneratorWidget::setCurrentSlotSegments(const std::vector<BidSegment> &segments)
+{
+    for (int row = 0; row < ladderTable_->rowCount(); ++row) {
+        ladderTable_->setItem(row, 0, new QTableWidgetItem(QString()));
+        ladderTable_->setItem(row, 1, new QTableWidgetItem(QString()));
+    }
+
+    for (int row = 0; row < static_cast<int>(segments.size()); ++row) {
+        if (row >= ladderTable_->rowCount()) {
+            break;
+        }
+        ladderTable_->setItem(row, 0,
+            new QTableWidgetItem(QString::number(segments[static_cast<std::size_t>(row)].quantityMw())));
+        ladderTable_->setItem(row, 1,
+            new QTableWidgetItem(QString::number(segments[static_cast<std::size_t>(row)].priceYuanPerMwh())));
+    }
+
+    saveCurrentToSlot(currentSlotIndex_);
+    outputLabel_->setText(QStringLiteral("已导入 %1 段发电报价").arg(segments.size()));
+}
+
 void GeneratorWidget::onTimeSlotChanged(int displaySlot)
 {
     const int newSlot = displaySlot - 1;

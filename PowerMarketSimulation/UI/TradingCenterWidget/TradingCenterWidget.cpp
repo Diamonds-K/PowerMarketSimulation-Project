@@ -1,5 +1,6 @@
 #include "UI/TradingCenterWidget/TradingCenterWidget.h"
 
+#include "Data/CSVReader/CSVReader.h"
 #include "UI/ConsumerWidget/ConsumerWidget.h"
 #include "UI/GeneratorWidget/GeneratorWidget.h"
 
@@ -16,6 +17,7 @@
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineSeries>
+#include <QMessageBox>
 #include <QPainter>
 #include <QPen>
 #include <QPushButton>
@@ -35,6 +37,43 @@ namespace {
 QString formatNumber(double value, int precision = 2)
 {
     return QString::number(value, 'f', precision);
+}
+
+std::vector<BidSegment> parseSegmentCsv(const QString &filePath,
+                                        QString &errorMessage)
+{
+    std::vector<BidSegment> segments;
+    std::vector<CSVReader::Row> rows;
+    std::string readError;
+    if (!CSVReader::read(filePath.toStdString(), rows, readError)) {
+        errorMessage = QString::fromStdString(readError);
+        return segments;
+    }
+
+    int segmentNo = 1;
+    for (const CSVReader::Row &row : rows) {
+        if (row.size() < 2) {
+            continue;
+        }
+
+        bool powerOk = false;
+        bool priceOk = false;
+        const double power = QString::fromStdString(row[0]).toDouble(&powerOk);
+        const double price = QString::fromStdString(row[1]).toDouble(&priceOk);
+        if (!powerOk || !priceOk) {
+            continue;
+        }
+        if (power <= 0.0 || price < 0.0) {
+            continue;
+        }
+
+        segments.push_back(BidSegment(segmentNo++, power, price));
+    }
+
+    if (segments.empty()) {
+        errorMessage = QStringLiteral("CSV 中没有读取到有效的“电量,价格”数据。");
+    }
+    return segments;
 }
 
 double totalQuantityMw(const std::vector<BidSegment> &segments)
@@ -274,7 +313,18 @@ void TradingCenterWidget::importGeneratorParameters()
         QStringLiteral("CSV 文件 (*.csv);;所有文件 (*)"));
 
     if (!filePath.isEmpty()) {
-        qDebug() << "Selected generator parameter CSV:" << filePath;
+        QString errorMessage;
+        const std::vector<BidSegment> segments = parseSegmentCsv(filePath, errorMessage);
+        if (!errorMessage.isEmpty()) {
+            QMessageBox::warning(this, QStringLiteral("导入失败"), errorMessage);
+            return;
+        }
+
+        generatorWidget_->setCurrentSlotSegments(segments);
+        QMessageBox::information(this,
+                                 QStringLiteral("导入成功"),
+                                 QStringLiteral("已导入 %1 段发电报价到当前时段。")
+                                     .arg(segments.size()));
     }
 }
 
@@ -287,7 +337,18 @@ void TradingCenterWidget::importLoadData()
         QStringLiteral("CSV 文件 (*.csv);;所有文件 (*)"));
 
     if (!filePath.isEmpty()) {
-        qDebug() << "Selected load data CSV:" << filePath;
+        QString errorMessage;
+        const std::vector<BidSegment> segments = parseSegmentCsv(filePath, errorMessage);
+        if (!errorMessage.isEmpty()) {
+            QMessageBox::warning(this, QStringLiteral("导入失败"), errorMessage);
+            return;
+        }
+
+        consumerWidget_->setCurrentSlotSegments(segments);
+        QMessageBox::information(this,
+                                 QStringLiteral("导入成功"),
+                                 QStringLiteral("已导入 %1 段负荷报价到当前时段。")
+                                     .arg(segments.size()));
     }
 }
 
