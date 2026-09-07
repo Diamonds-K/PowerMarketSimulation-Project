@@ -83,6 +83,21 @@ MarketResult PiecewiseClearing::clear(const MarketInput& input) {
                   return lhs.segmentNo < rhs.segmentNo;
               });
 
+    // Pmin 是必发电量，先按用户报价从高到低满足需求。
+    // 先把 Pmin 从用户需求段中扣除，再让增量段与剩余需求撮合。
+    std::vector<double> pminAllocatedMw(input.consumers().size(), 0.0);
+    double remainingPMin = sumPMin;
+    for (ConsumerRef& consumer : consumerSegments) {
+        if (remainingPMin <= kEpsilon) {
+            break;
+        }
+
+        const double allocated = std::min(consumer.quantityMw, remainingPMin);
+        consumer.quantityMw -= allocated;
+        remainingPMin -= allocated;
+        pminAllocatedMw[static_cast<std::size_t>(consumer.consumerIndex)] += allocated;
+    }
+
     // 双指针撮合：双方报价段都只向前移动，不回退。
     size_t sellIndex = 0;
     size_t buyIndex = 0;
@@ -140,14 +155,9 @@ MarketResult PiecewiseClearing::clear(const MarketInput& input) {
         }
     }
 
-    // Pmin 电量按用户申报比例分摊到各用户。
-    const double totalDeclared = input.totalDeclaredDemandMw();
-    if (totalDeclared > kEpsilon) {
-        for (size_t i = 0; i < input.consumers().size(); ++i) {
-            const double declared = input.consumers()[i].bidSheet().totalIncrementMw();
-            const double share = declared / totalDeclared * sumPMin;
-            consumerResults[i].clearedDemandMw += share;
-        }
+    // 把已经分配给用户的 Pmin 电量加回到用户成交结果中。
+    for (size_t i = 0; i < input.consumers().size(); ++i) {
+        consumerResults[i].clearedDemandMw += pminAllocatedMw[i];
     }
 
     double totalClearedMw = sumPMin + matchedIncrementMw;

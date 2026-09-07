@@ -71,13 +71,13 @@ void testSimpleMatching() {
 
     assert(result.feasible());
     assert(near(result.clearingPriceYuanPerMwh(), 250.0));
-    assert(near(result.clearingVolumeMw(), 70.0));
-    assert(near(result.shortageMw(), 10.0));
+    assert(near(result.clearingVolumeMw(), 50.0));
+    assert(near(result.shortageMw(), 30.0));
     assert(result.generatorResults().size() == 1);
-    assert(near(result.generatorResults()[0].outputMw, 70.0));
+    assert(near(result.generatorResults()[0].outputMw, 50.0));
     assert(result.generatorResults()[0].matchedSegments.size() == 2);
     assert(result.consumerResults().size() == 1);
-    assert(near(result.consumerResults()[0].clearedDemandMw, 70.0));
+    assert(near(result.consumerResults()[0].clearedDemandMw, 50.0));
 }
 
 void testGeneratorCapacityLimit() {
