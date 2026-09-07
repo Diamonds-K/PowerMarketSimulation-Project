@@ -184,6 +184,7 @@ QChart *createPiecewiseChart(const Generator &generator, const Consumer &consume
     auto *supplySeries = new QLineSeries;
     supplySeries->setName(QStringLiteral("供给曲线"));
     supplySeries->setPen(QPen(QColor(0, 150, 80), 2));
+    supplySeries->append(generator.pMinMw(), 0.0);
     appendStepCurve(supplySeries, supplySegments, true, generator.pMinMw());
 
     auto *demandSeries = new QLineSeries;
