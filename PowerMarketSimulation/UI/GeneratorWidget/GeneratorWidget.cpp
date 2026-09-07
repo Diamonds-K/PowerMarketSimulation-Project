@@ -1,45 +1,106 @@
 #include "UI/GeneratorWidget/GeneratorWidget.h"
 
+#include <algorithm>
+#include <map>
+#include <set>
+#include <string>
+#include <tuple>
+#include <utility>
+
 #include <QComboBox>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QRadioButton>
 #include <QSpinBox>
 #include <QStackedWidget>
+#include <QStringList>
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QVBoxLayout>
 
+#include "Data/CSVReader/CSVReader.h"
+
 namespace pms {
 
-GeneratorWidget::GeneratorWidget(QWidget *parent)
-    : QWidget(parent)
+namespace {
+
+GeneratorUnitData makeDefaultUnit(const QString &id)
 {
-    for (GeneratorSlotData &slot : slotData_) {
+    GeneratorUnitData unit;
+    unit.id = id;
+    unit.pMinMw = 20.0;
+    unit.pMaxMw = 100.0;
+
+    for (GeneratorSlotData &slot : unit.timeSlots) {
+        slot.quadraticMode = false;
+        slot.quadraticA = 0.05;
+        slot.quadraticB = 10.0;
+        slot.quadraticC = 0.0;
         slot.segments = {
             BidSegment(1, 20.0, 200.0),
             BidSegment(2, 30.0, 250.0),
             BidSegment(3, 30.0, 300.0)
         };
     }
+    return unit;
+}
+
+bool parsePositiveDouble(const QString &text, double &value)
+{
+    bool ok = false;
+    value = text.toDouble(&ok);
+    return ok && value >= 0.0;
+}
+
+bool isParamHeader(const std::vector<std::string> &row)
+{
+    if (row.empty()) {
+        return false;
+    }
+    return row.front() == "generator_id" || row.front() == "consumer_id";
+}
+
+bool isBidHeader(const std::vector<std::string> &row)
+{
+    if (row.empty()) {
+        return false;
+    }
+    return row.front() == "owner_id" || row.front() == "generator_id" ||
+           row.front() == "consumer_id";
+}
+
+} // namespace
+
+GeneratorWidget::GeneratorWidget(QWidget *parent)
+    : QWidget(parent)
+{
+    units_.push_back(makeDefaultUnit(QStringLiteral("G1")));
 
     auto *rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(12, 12, 12, 12);
     rootLayout->setSpacing(10);
 
+    auto *unitGroup = new QGroupBox(QStringLiteral("机组列表"), this);
+    auto *unitLayout = new QHBoxLayout(unitGroup);
+    unitLayout->addWidget(new QLabel(QStringLiteral("当前机组："), unitGroup));
+
+    unitCombo_ = new QComboBox(unitGroup);
+    unitCombo_->setEditable(true);
+    unitLayout->addWidget(unitCombo_, 1);
+
+    addUnitButton_ = new QPushButton(QStringLiteral("新增机组"), unitGroup);
+    removeUnitButton_ = new QPushButton(QStringLiteral("删除机组"), unitGroup);
+    unitLayout->addWidget(addUnitButton_);
+    unitLayout->addWidget(removeUnitButton_);
+    rootLayout->addWidget(unitGroup);
+
     auto *paramGroup = new QGroupBox(QStringLiteral("机组参数"), this);
     auto *paramLayout = new QHBoxLayout(paramGroup);
-    paramLayout->addWidget(new QLabel(QStringLiteral("选择机组："), paramGroup));
-
-    unitCombo_ = new QComboBox(paramGroup);
-    unitCombo_->setEditable(true);
-    unitCombo_->addItem(QStringLiteral("G1"));
-    paramLayout->addWidget(unitCombo_);
-
     paramLayout->addWidget(new QLabel(QStringLiteral("Pmin (MW):"), paramGroup));
     pMinEdit_ = new QLineEdit(QStringLiteral("20"), paramGroup);
     paramLayout->addWidget(pMinEdit_);
@@ -82,8 +143,8 @@ GeneratorWidget::GeneratorWidget(QWidget *parent)
     bottomLayout->addWidget(revenueLabel_);
     rootLayout->addLayout(bottomLayout);
 
-    loadSlot(0);
     connectSignals();
+    loadUnit(currentUnitIndex_);
 }
 
 QWidget *GeneratorWidget::createLadderPage()
@@ -94,7 +155,7 @@ QWidget *GeneratorWidget::createLadderPage()
 
     ladderTable_ = new QTableWidget(10, 2, page);
     ladderTable_->setHorizontalHeaderLabels({
-        QStringLiteral("出力段上限 P (MW)"),
+        QStringLiteral("分段电量 ΔP (MW)"),
         QStringLiteral("分段报价 C (元/MWh)")
     });
     ladderTable_->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
@@ -146,13 +207,24 @@ void GeneratorWidget::connectSignals()
             this, &GeneratorWidget::submitCurrentSlot);
     connect(timeSlotSpinBox_, &QSpinBox::valueChanged,
             this, &GeneratorWidget::onTimeSlotChanged);
+    connect(unitCombo_, &QComboBox::currentIndexChanged,
+            this, &GeneratorWidget::onUnitIndexChanged);
+    connect(addUnitButton_, &QPushButton::clicked,
+            this, &GeneratorWidget::addUnitClicked);
+    connect(removeUnitButton_, &QPushButton::clicked,
+            this, &GeneratorWidget::removeUnitClicked);
 }
 
 void GeneratorWidget::submitCurrentSlot()
 {
-    saveCurrentToSlot(currentSlotIndex_);
+    saveCurrent();
     outputLabel_->setText(QStringLiteral("已保存第 %1 时段申报")
                               .arg(currentSlotIndex_ + 1));
+}
+
+void GeneratorWidget::flushCurrentSlot()
+{
+    saveCurrent();
 }
 
 void GeneratorWidget::setTimeSlot(int displaySlot)
@@ -169,36 +241,107 @@ void GeneratorWidget::setTimeSlot(int displaySlot)
     syncingTimeSlot_ = false;
 }
 
-void GeneratorWidget::setCurrentSlotSegments(const std::vector<BidSegment> &segments)
+void GeneratorWidget::saveCurrentToSlot(int unitIndex, int slotIndex)
 {
-    for (int row = 0; row < ladderTable_->rowCount(); ++row) {
-        ladderTable_->setItem(row, 0, new QTableWidgetItem(QString()));
-        ladderTable_->setItem(row, 1, new QTableWidgetItem(QString()));
+    if (unitIndex < 0 || unitIndex >= static_cast<int>(units_.size())) {
+        return;
     }
 
-    for (int row = 0; row < static_cast<int>(segments.size()); ++row) {
+    GeneratorUnitData &unit = units_[static_cast<std::size_t>(unitIndex)];
+    const QString typedId = unitCombo_->currentText().trimmed();
+    if (!typedId.isEmpty()) {
+        if (idExists(typedId, unitIndex)) {
+            outputLabel_->setText(QStringLiteral("机组 ID 重复，未保存"));
+            return;
+        }
+        unit.id = typedId;
+    }
+
+    unit.pMinMw = pMinEdit_->text().toDouble();
+    unit.pMaxMw = pMaxEdit_->text().toDouble();
+
+    GeneratorSlotData &slot = unit.timeSlots[static_cast<std::size_t>(slotIndex)];
+    slot.quadraticMode = quadraticModeRadio_->isChecked();
+    slot.quadraticA = aEdit_->text().toDouble();
+    slot.quadraticB = bEdit_->text().toDouble();
+    slot.quadraticC = cEdit_->text().toDouble();
+
+    slot.segments.clear();
+    for (int row = 0; row < ladderTable_->rowCount(); ++row) {
+        const double quantity = cellText(row, 0).toDouble();
+        const double price = cellText(row, 1).toDouble();
+        if (quantity > 0.0 && price >= 0.0) {
+            slot.segments.push_back(BidSegment(row + 1, quantity, price));
+        }
+    }
+}
+
+void GeneratorWidget::saveCurrent()
+{
+    saveCurrentToSlot(currentUnitIndex_, currentSlotIndex_);
+}
+
+void GeneratorWidget::loadUnit(int unitIndex)
+{
+    if (units_.empty()) {
+        return;
+    }
+    if (unitIndex < 0 || unitIndex >= static_cast<int>(units_.size())) {
+        unitIndex = 0;
+    }
+    currentUnitIndex_ = unitIndex;
+
+    unitCombo_->blockSignals(true);
+    unitCombo_->clear();
+    for (const GeneratorUnitData &unit : units_) {
+        unitCombo_->addItem(unit.id);
+    }
+    unitCombo_->setCurrentIndex(currentUnitIndex_);
+    unitCombo_->blockSignals(false);
+
+    loadSlot(currentSlotIndex_);
+}
+
+void GeneratorWidget::loadSlot(int slotIndex)
+{
+    if (units_.empty() || slotIndex < 0 || slotIndex >= 96) {
+        return;
+    }
+    currentSlotIndex_ = slotIndex;
+    const GeneratorUnitData &unit = units_[static_cast<std::size_t>(currentUnitIndex_)];
+    const GeneratorSlotData &slot = unit.timeSlots[static_cast<std::size_t>(slotIndex)];
+
+    pMinEdit_->setText(QString::number(unit.pMinMw));
+    pMaxEdit_->setText(QString::number(unit.pMaxMw));
+    aEdit_->setText(QString::number(slot.quadraticA));
+    bEdit_->setText(QString::number(slot.quadraticB));
+    cEdit_->setText(QString::number(slot.quadraticC));
+
+    if (slot.quadraticMode) {
+        quadraticModeRadio_->setChecked(true);
+        modeStack_->setCurrentIndex(1);
+    } else {
+        ladderModeRadio_->setChecked(true);
+        modeStack_->setCurrentIndex(0);
+    }
+
+    clearSegmentTable();
+    for (int row = 0; row < static_cast<int>(slot.segments.size()); ++row) {
         if (row >= ladderTable_->rowCount()) {
             break;
         }
         ladderTable_->setItem(row, 0,
-            new QTableWidgetItem(QString::number(segments[static_cast<std::size_t>(row)].quantityMw())));
+            new QTableWidgetItem(QString::number(slot.segments[static_cast<std::size_t>(row)].quantityMw())));
         ladderTable_->setItem(row, 1,
-            new QTableWidgetItem(QString::number(segments[static_cast<std::size_t>(row)].priceYuanPerMwh())));
+            new QTableWidgetItem(QString::number(slot.segments[static_cast<std::size_t>(row)].priceYuanPerMwh())));
     }
-
-    saveCurrentToSlot(currentSlotIndex_);
-    outputLabel_->setText(QStringLiteral("已导入 %1 段发电报价").arg(segments.size()));
 }
 
-void GeneratorWidget::setSlotSegments(int slotIndex, const std::vector<BidSegment> &segments)
+void GeneratorWidget::clearSegmentTable()
 {
-    if (slotIndex < 0 || slotIndex >= 96) {
-        return;
-    }
-
-    slotData_[static_cast<std::size_t>(slotIndex)].segments = segments;
-    if (slotIndex == currentSlotIndex_) {
-        setCurrentSlotSegments(segments);
+    for (int row = 0; row < ladderTable_->rowCount(); ++row) {
+        ladderTable_->setItem(row, 0, new QTableWidgetItem(QString()));
+        ladderTable_->setItem(row, 1, new QTableWidgetItem(QString()));
     }
 }
 
@@ -209,7 +352,7 @@ void GeneratorWidget::onTimeSlotChanged(int displaySlot)
         return;
     }
 
-    saveCurrentToSlot(currentSlotIndex_);
+    saveCurrent();
     currentSlotIndex_ = newSlot;
     loadSlot(currentSlotIndex_);
 
@@ -218,106 +361,308 @@ void GeneratorWidget::onTimeSlotChanged(int displaySlot)
     }
 }
 
-void GeneratorWidget::saveCurrentToSlot(int slotIndex)
+void GeneratorWidget::onUnitIndexChanged(int index)
 {
-    GeneratorSlotData &data = slotData_[static_cast<std::size_t>(slotIndex)];
-    data.id = unitCombo_->currentText().trimmed().isEmpty()
-                  ? QStringLiteral("G1")
-                  : unitCombo_->currentText().trimmed();
-    data.pMinMw = pMinEdit_->text().toDouble();
-    data.pMaxMw = pMaxEdit_->text().toDouble();
-    data.quadraticMode = quadraticModeRadio_->isChecked();
-    data.quadraticA = aEdit_->text().toDouble();
-    data.quadraticB = bEdit_->text().toDouble();
-    data.quadraticC = cEdit_->text().toDouble();
-
-    data.segments.clear();
-    for (int row = 0; row < ladderTable_->rowCount(); ++row) {
-        const double quantity = cellText(row, 0).toDouble();
-        const double price = cellText(row, 1).toDouble();
-        if (quantity > 0.0 && price >= 0.0) {
-            data.segments.push_back(BidSegment(row + 1, quantity, price));
+    if (index < 0 || index >= static_cast<int>(units_.size()) ||
+        index == currentUnitIndex_) {
+        if (index >= 0 && index < static_cast<int>(units_.size())) {
+            loadSlot(currentSlotIndex_);
         }
+        return;
     }
+
+    saveCurrent();
+    loadUnit(index);
 }
 
-void GeneratorWidget::loadSlot(int slotIndex)
+void GeneratorWidget::addUnitClicked()
 {
-    const GeneratorSlotData &data = slotData_[static_cast<std::size_t>(slotIndex)];
-    unitCombo_->setCurrentText(data.id);
-    pMinEdit_->setText(QString::number(data.pMinMw));
-    pMaxEdit_->setText(QString::number(data.pMaxMw));
-    aEdit_->setText(QString::number(data.quadraticA));
-    bEdit_->setText(QString::number(data.quadraticB));
-    cEdit_->setText(QString::number(data.quadraticC));
+    addUnit();
+}
 
-    if (data.quadraticMode) {
-        quadraticModeRadio_->setChecked(true);
-    } else {
-        ladderModeRadio_->setChecked(true);
+void GeneratorWidget::removeUnitClicked()
+{
+    removeCurrentUnit();
+}
+
+bool GeneratorWidget::addUnit()
+{
+    saveCurrent();
+    units_.push_back(makeDefaultUnit(nextDefaultUnitId()));
+    loadUnit(static_cast<int>(units_.size()) - 1);
+    return true;
+}
+
+bool GeneratorWidget::removeCurrentUnit()
+{
+    if (units_.size() <= 1) {
+        QMessageBox::information(this, QStringLiteral("删除机组"),
+                                 QStringLiteral("至少需要保留一台机组。"));
+        return false;
     }
 
-    for (int row = 0; row < ladderTable_->rowCount(); ++row) {
-        ladderTable_->setItem(row, 0, new QTableWidgetItem(QString()));
-        ladderTable_->setItem(row, 1, new QTableWidgetItem(QString()));
+    saveCurrent();
+    units_.erase(units_.begin() + currentUnitIndex_);
+    if (currentUnitIndex_ >= static_cast<int>(units_.size())) {
+        currentUnitIndex_ = static_cast<int>(units_.size()) - 1;
     }
+    loadUnit(currentUnitIndex_);
+    return true;
+}
 
-    for (int row = 0; row < static_cast<int>(data.segments.size()); ++row) {
-        if (row >= ladderTable_->rowCount()) {
-            break;
-        }
-        ladderTable_->setItem(row, 0,
-            new QTableWidgetItem(QString::number(data.segments[static_cast<std::size_t>(row)].quantityMw())));
-        ladderTable_->setItem(row, 1,
-            new QTableWidgetItem(QString::number(data.segments[static_cast<std::size_t>(row)].priceYuanPerMwh())));
-    }
+int GeneratorWidget::unitCount() const
+{
+    return static_cast<int>(units_.size());
 }
 
 Generator GeneratorWidget::buildGenerator(bool quadratic) const
 {
-    GeneratorSlotData data;
-    data.id = unitCombo_->currentText().trimmed().isEmpty()
-                  ? QStringLiteral("G1")
-                  : unitCombo_->currentText().trimmed();
-    data.pMinMw = pMinEdit_->text().toDouble();
-    data.pMaxMw = pMaxEdit_->text().toDouble();
-    data.quadraticA = aEdit_->text().toDouble();
-    data.quadraticB = bEdit_->text().toDouble();
-    data.quadraticC = cEdit_->text().toDouble();
+    return buildFromData(units_[static_cast<std::size_t>(currentUnitIndex_)],
+                         currentSlotIndex_,
+                         quadratic);
+}
 
-    for (int row = 0; row < ladderTable_->rowCount(); ++row) {
-        const double quantity = cellText(row, 0).toDouble();
-        const double price = cellText(row, 1).toDouble();
-        if (quantity > 0.0 && price >= 0.0) {
-            data.segments.push_back(BidSegment(row + 1, quantity, price));
-        }
+std::vector<Generator> GeneratorWidget::buildGenerators(bool quadratic) const
+{
+    return buildGeneratorsForSlot(currentSlotIndex_, quadratic);
+}
+
+std::vector<Generator> GeneratorWidget::buildGeneratorsForSlot(
+    int slotIndex,
+    bool quadratic) const
+{
+    std::vector<Generator> generators;
+    generators.reserve(units_.size());
+    for (const GeneratorUnitData &unit : units_) {
+        generators.push_back(buildFromData(unit, slotIndex, quadratic));
     }
-    return buildFromData(data, quadratic);
+    return generators;
 }
 
-Generator GeneratorWidget::buildGeneratorForSlot(int slotIndex, bool quadratic) const
+Generator GeneratorWidget::buildFromData(const GeneratorUnitData &unit,
+                                         int slotIndex,
+                                         bool quadratic) const
 {
-    return buildFromData(slotData_[static_cast<std::size_t>(slotIndex)], quadratic);
-}
-
-Generator GeneratorWidget::buildFromData(const GeneratorSlotData &data, bool quadratic) const
-{
-    Generator generator(data.id.toStdString(), data.pMinMw, data.pMaxMw);
+    Generator generator(unit.id.toStdString(), unit.pMinMw, unit.pMaxMw);
+    const GeneratorSlotData &slot = unit.timeSlots[static_cast<std::size_t>(slotIndex)];
 
     BidSheet sheet;
-    sheet.setOwnerId(data.id.toStdString());
+    sheet.setOwnerId(unit.id.toStdString());
     if (quadratic) {
         sheet.setMode(BidSheet::Mode::Quadratic);
-        sheet.setQuadraticCoefficients(data.quadraticA, data.quadraticB, data.quadraticC);
+        sheet.setQuadraticCoefficients(slot.quadraticA,
+                                       slot.quadraticB,
+                                       slot.quadraticC);
     } else {
         sheet.setMode(BidSheet::Mode::Piecewise);
-        for (const BidSegment &segment : data.segments) {
+        for (const BidSegment &segment : slot.segments) {
             sheet.addSegment(segment);
         }
     }
 
     generator.setBidSheet(sheet);
     return generator;
+}
+
+bool GeneratorWidget::importParametersFromCsv(const QString &filePath,
+                                              QString *errorMessage)
+{
+    std::vector<CSVReader::Row> rows;
+    std::string readError;
+    if (!CSVReader::read(filePath.toStdString(), rows, readError)) {
+        if (errorMessage) {
+            *errorMessage = QString::fromStdString(readError);
+        }
+        return false;
+    }
+
+    std::vector<GeneratorUnitData> nextUnits;
+    std::set<QString> seenIds;
+    QStringList errors;
+
+    for (const CSVReader::Row &row : rows) {
+        if (row.empty() || isParamHeader(row)) {
+            continue;
+        }
+        if (row.size() < 4) {
+            errors << QStringLiteral("发电参数行至少需要 4 列");
+            continue;
+        }
+
+        const QString id = QString::fromStdString(row[0]).trimmed();
+        double pMin = 0.0;
+        double pMax = 0.0;
+        if (id.isEmpty() || seenIds.count(id) > 0) {
+            errors << QStringLiteral("发电参数存在空或重复 ID: %1").arg(id);
+            continue;
+        }
+        if (!parsePositiveDouble(QString::fromStdString(row[1]), pMin) ||
+            !parsePositiveDouble(QString::fromStdString(row[2]), pMax) ||
+            pMax <= pMin) {
+            errors << QStringLiteral("机组 %1 的 Pmin/Pmax 非法").arg(id);
+            continue;
+        }
+
+        const QString mode = QString::fromStdString(row[3]).trimmed().toLower();
+        if (mode != QStringLiteral("piecewise") &&
+            mode != QStringLiteral("quadratic")) {
+            errors << QStringLiteral("机组 %1 的模式非法: %2").arg(id, mode);
+            continue;
+        }
+
+        GeneratorUnitData unit;
+        unit.id = id;
+        unit.pMinMw = pMin;
+        unit.pMaxMw = pMax;
+        for (GeneratorSlotData &slot : unit.timeSlots) {
+            slot.quadraticMode = (mode == QStringLiteral("quadratic"));
+        }
+        seenIds.insert(id);
+        nextUnits.push_back(unit);
+    }
+
+    if (!errors.isEmpty() || nextUnits.empty()) {
+        if (errorMessage) {
+            *errorMessage = errors.isEmpty()
+                                ? QStringLiteral("发电参数 CSV 没有有效数据")
+                                : errors.join(QStringLiteral("\n"));
+        }
+        return false;
+    }
+
+    units_ = std::move(nextUnits);
+    currentUnitIndex_ = 0;
+    currentSlotIndex_ = 0;
+    loadUnit(0);
+    return true;
+}
+
+bool GeneratorWidget::importBidsFromCsv(const QString &filePath,
+                                        QString *errorMessage)
+{
+    struct BidRecord {
+        QString id;
+        int timeSlot = 0;
+        int segmentNo = 0;
+        double quantityMw = 0.0;
+        double priceYuanPerMwh = 0.0;
+    };
+
+    std::vector<CSVReader::Row> rows;
+    std::string readError;
+    if (!CSVReader::read(filePath.toStdString(), rows, readError)) {
+        if (errorMessage) {
+            *errorMessage = QString::fromStdString(readError);
+        }
+        return false;
+    }
+
+    std::vector<BidRecord> records;
+    std::set<std::tuple<QString, int, int>> seen;
+    QStringList errors;
+
+    for (const CSVReader::Row &row : rows) {
+        if (row.empty() || isBidHeader(row)) {
+            continue;
+        }
+        if (row.size() < 5) {
+            errors << QStringLiteral("发电报价行至少需要 5 列");
+            continue;
+        }
+
+        BidRecord record;
+        bool slotOk = false;
+        bool segmentOk = false;
+        record.id = QString::fromStdString(row[0]).trimmed();
+        record.timeSlot = QString::fromStdString(row[1]).toInt(&slotOk);
+        record.segmentNo = QString::fromStdString(row[2]).toInt(&segmentOk);
+        record.quantityMw = QString::fromStdString(row[3]).toDouble();
+        record.priceYuanPerMwh = QString::fromStdString(row[4]).toDouble();
+
+        if (record.id.isEmpty() || !idExists(record.id)) {
+            errors << QStringLiteral("发电报价包含未知机组: %1").arg(record.id);
+            continue;
+        }
+        if (!slotOk || record.timeSlot < 1 || record.timeSlot > 96 ||
+            !segmentOk || record.segmentNo < 1 ||
+            record.quantityMw <= 0.0 || record.priceYuanPerMwh < 0.0) {
+            errors << QStringLiteral("机组 %1 的报价行数值非法").arg(record.id);
+            continue;
+        }
+
+        const auto key = std::make_tuple(record.id, record.timeSlot, record.segmentNo);
+        if (seen.count(key) > 0) {
+            errors << QStringLiteral("机组 %1 时段 %2 段号 %3 重复")
+                          .arg(record.id)
+                          .arg(record.timeSlot)
+                          .arg(record.segmentNo);
+            continue;
+        }
+        seen.insert(key);
+        records.push_back(record);
+    }
+
+    if (!errors.isEmpty() || records.empty()) {
+        if (errorMessage) {
+            *errorMessage = errors.isEmpty()
+                                ? QStringLiteral("发电报价 CSV 没有有效数据")
+                                : errors.join(QStringLiteral("\n"));
+        }
+        return false;
+    }
+
+    std::map<std::pair<QString, int>, std::vector<BidSegment>> grouped;
+    for (const BidRecord &record : records) {
+        const auto key = std::make_pair(record.id, record.timeSlot - 1);
+        grouped[key].push_back(BidSegment(record.segmentNo,
+                                          record.quantityMw,
+                                          record.priceYuanPerMwh));
+    }
+
+    for (auto &entry : grouped) {
+        std::sort(entry.second.begin(), entry.second.end(),
+                  [](const BidSegment &lhs, const BidSegment &rhs) {
+                      return lhs.segmentNo() < rhs.segmentNo();
+                  });
+    }
+
+    for (const auto &entry : grouped) {
+        const QString id = entry.first.first;
+        const int slot = entry.first.second;
+        for (GeneratorUnitData &unit : units_) {
+            if (unit.id == id) {
+                unit.timeSlots[static_cast<std::size_t>(slot)].segments = entry.second;
+            }
+        }
+    }
+
+    loadSlot(currentSlotIndex_);
+    return true;
+}
+
+bool GeneratorWidget::idExists(const QString &id, int exceptIndex) const
+{
+    for (int i = 0; i < static_cast<int>(units_.size()); ++i) {
+        if (i == exceptIndex) {
+            continue;
+        }
+        if (units_[static_cast<std::size_t>(i)].id == id) {
+            return true;
+        }
+    }
+    return false;
+}
+
+QString GeneratorWidget::nextDefaultUnitId() const
+{
+    int index = 1;
+    while (true) {
+        const QString candidate = QStringLiteral("G%1").arg(index);
+        if (!idExists(candidate)) {
+            return candidate;
+        }
+        ++index;
+    }
 }
 
 QString GeneratorWidget::cellText(int row, int column) const

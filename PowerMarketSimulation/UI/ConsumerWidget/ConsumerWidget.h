@@ -1,11 +1,13 @@
 #pragma once
 
 #include <array>
+#include <string>
 #include <vector>
 
 #include <QString>
 #include <QWidget>
 
+#include "Model/BidSegment/BidSegment.h"
 #include "Model/Consumer/Consumer.h"
 
 class QComboBox;
@@ -18,10 +20,13 @@ class QTableWidget;
 namespace pms {
 
 struct ConsumerSlotData {
-    QString id = QStringLiteral("C1");
     double fixedDemandMw = 100.0;
-    bool quadraticMode = false;
     std::vector<BidSegment> segments;
+};
+
+struct ConsumerUnitData {
+    QString id = QStringLiteral("C1");
+    std::array<ConsumerSlotData, 96> timeSlots;
 };
 
 class ConsumerWidget : public QWidget {
@@ -31,10 +36,17 @@ public:
     explicit ConsumerWidget(QWidget *parent = nullptr);
 
     Consumer buildConsumer(bool quadratic) const;
-    Consumer buildConsumerForSlot(int slotIndex, bool quadratic) const;
+    std::vector<Consumer> buildConsumers(bool quadratic) const;
+    std::vector<Consumer> buildConsumersForSlot(int slotIndex, bool quadratic) const;
+
     void setTimeSlot(int displaySlot);
-    void setCurrentSlotSegments(const std::vector<BidSegment> &segments);
-    void setSlotSegments(int slotIndex, const std::vector<BidSegment> &segments);
+    void flushCurrentSlot();
+    bool importParametersFromCsv(const QString &filePath, QString *errorMessage = nullptr);
+    bool importBidsFromCsv(const QString &filePath, QString *errorMessage = nullptr);
+
+    bool addUnit();
+    bool removeCurrentUnit();
+    int unitCount() const;
 
 signals:
     void timeSlotChanged(int displaySlot);
@@ -42,23 +54,37 @@ signals:
 private slots:
     void submitCurrentSlot();
     void onTimeSlotChanged(int displaySlot);
+    void onUnitIndexChanged(int index);
+    void addUnitClicked();
+    void removeUnitClicked();
 
 private:
     void connectSignals();
-    void saveCurrentToSlot(int slotIndex);
+    void saveCurrentToSlot(int unitIndex, int slotIndex);
+    void saveCurrent();
+    void loadUnit(int unitIndex);
     void loadSlot(int slotIndex);
-    Consumer buildFromData(const ConsumerSlotData &data, bool quadratic) const;
+    void clearSegmentTable();
+    Consumer buildFromData(const ConsumerUnitData &unit,
+                           int slotIndex,
+                           bool quadratic) const;
     QString cellText(int row, int column) const;
+    bool idExists(const QString &id, int exceptIndex = -1) const;
+    QString nextDefaultUnitId() const;
 
     QComboBox *userCombo_ = nullptr;
+    QPushButton *addUnitButton_ = nullptr;
+    QPushButton *removeUnitButton_ = nullptr;
     QSpinBox *timeSlotSpinBox_ = nullptr;
     QLineEdit *fixedDemandEdit_ = nullptr;
     QTableWidget *loadTable_ = nullptr;
     QPushButton *submitButton_ = nullptr;
     QLabel *totalCostLabel_ = nullptr;
 
-    std::array<ConsumerSlotData, 96> slotData_;
+    std::vector<ConsumerUnitData> units_;
+    int currentUnitIndex_ = 0;
     int currentSlotIndex_ = 0;
+    bool syncingUnit_ = false;
     bool syncingTimeSlot_ = false;
 };
 

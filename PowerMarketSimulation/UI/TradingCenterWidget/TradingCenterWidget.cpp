@@ -1,9 +1,10 @@
 #include "UI/TradingCenterWidget/TradingCenterWidget.h"
 
-#include "Data/CSVReader/CSVReader.h"
-#include "Data/CSVWriter/CSVWriter.h"
-#include "UI/ConsumerWidget/ConsumerWidget.h"
-#include "UI/GeneratorWidget/GeneratorWidget.h"
+#include <algorithm>
+#include <cmath>
+#include <numeric>
+#include <string>
+#include <vector>
 
 #include <QAbstractItemView>
 #include <QChart>
@@ -13,6 +14,7 @@
 #include <QDebug>
 #include <QFileDialog>
 #include <QFont>
+#include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -23,16 +25,18 @@
 #include <QPen>
 #include <QPushButton>
 #include <QSpinBox>
+#include <QTabWidget>
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QValueAxis>
 #include <QVBoxLayout>
 
-#include <algorithm>
-#include <numeric>
-#include <vector>
+#include "Data/CSVWriter/CSVWriter.h"
+#include "UI/ConsumerWidget/ConsumerWidget.h"
+#include "UI/GeneratorWidget/GeneratorWidget.h"
 
 namespace pms {
+
 namespace {
 
 QString formatNumber(double value, int precision = 2)
@@ -40,87 +44,29 @@ QString formatNumber(double value, int precision = 2)
     return QString::number(value, 'f', precision);
 }
 
-std::vector<BidSegment> parseSegmentCsv(const QString &filePath,
-                                        QString &errorMessage)
+void appendStepCurve(QLineSeries *series,
+                     std::vector<BidSegment> segments,
+                     bool sortAscendingByPrice,
+                     double startPower = 0.0)
 {
-    std::vector<BidSegment> segments;
-    std::vector<CSVReader::Row> rows;
-    std::string readError;
-    if (!CSVReader::read(filePath.toStdString(), rows, readError)) {
-        errorMessage = QString::fromStdString(readError);
-        return segments;
+    if (sortAscendingByPrice) {
+        std::sort(segments.begin(), segments.end(),
+                  [](const BidSegment &lhs, const BidSegment &rhs) {
+                      return lhs.priceYuanPerMwh() < rhs.priceYuanPerMwh();
+                  });
+    } else {
+        std::sort(segments.begin(), segments.end(),
+                  [](const BidSegment &lhs, const BidSegment &rhs) {
+                      return lhs.priceYuanPerMwh() > rhs.priceYuanPerMwh();
+                  });
     }
 
-    int segmentNo = 1;
-    for (const CSVReader::Row &row : rows) {
-        if (row.size() < 2) {
-            continue;
-        }
-
-        bool powerOk = false;
-        bool priceOk = false;
-        const double power = QString::fromStdString(row[0]).toDouble(&powerOk);
-        const double price = QString::fromStdString(row[1]).toDouble(&priceOk);
-        if (!powerOk || !priceOk) {
-            continue;
-        }
-        if (power <= 0.0 || price < 0.0) {
-            continue;
-        }
-
-        segments.push_back(BidSegment(segmentNo++, power, price));
+    double cumulativePower = startPower;
+    for (const BidSegment &segment : segments) {
+        series->append(cumulativePower, segment.priceYuanPerMwh());
+        cumulativePower += segment.quantityMw();
+        series->append(cumulativePower, segment.priceYuanPerMwh());
     }
-
-    if (segments.empty()) {
-        errorMessage = QStringLiteral("CSV 中没有读取到有效的“电量,价格”数据。");
-    }
-    return segments;
-}
-
-struct SlotSegments {
-    int timeSlot = 0;
-    std::vector<BidSegment> segments;
-};
-
-std::vector<SlotSegments> parseSlotCsv(const QString &filePath,
-                                       QString &errorMessage)
-{
-    std::vector<SlotSegments> slotGroups;
-    std::vector<CSVReader::Row> rows;
-    std::string readError;
-    if (!CSVReader::read(filePath.toStdString(), rows, readError)) {
-        errorMessage = QString::fromStdString(readError);
-        return slotGroups;
-    }
-
-    for (const CSVReader::Row &row : rows) {
-        if (row.size() < 3) {
-            continue;
-        }
-
-        bool slotOk = false;
-        bool powerOk = false;
-        bool priceOk = false;
-        const int timeSlot = QString::fromStdString(row[0]).toInt(&slotOk);
-        const double power = QString::fromStdString(row[1]).toDouble(&powerOk);
-        const double price = QString::fromStdString(row[2]).toDouble(&priceOk);
-        if (!slotOk || !powerOk || !priceOk) {
-            continue;
-        }
-        if (timeSlot < 1 || timeSlot > 96 || power <= 0.0 || price < 0.0) {
-            continue;
-        }
-
-        SlotSegments group;
-        group.timeSlot = timeSlot;
-        group.segments.push_back(BidSegment(1, power, price));
-        slotGroups.push_back(group);
-    }
-
-    if (slotGroups.empty()) {
-        errorMessage = QStringLiteral("CSV 中没有读取到有效的“时段,电量,价格”数据。");
-    }
-    return slotGroups;
 }
 
 double totalQuantityMw(const std::vector<BidSegment> &segments)
@@ -136,7 +82,6 @@ double maxPriceYuanPerMwh(const std::vector<BidSegment> &segments)
     if (segments.empty()) {
         return 0.0;
     }
-
     const auto it = std::max_element(segments.begin(), segments.end(),
                                      [](const BidSegment &lhs, const BidSegment &rhs) {
                                          return lhs.priceYuanPerMwh() < rhs.priceYuanPerMwh();
@@ -144,48 +89,62 @@ double maxPriceYuanPerMwh(const std::vector<BidSegment> &segments)
     return it->priceYuanPerMwh();
 }
 
-void appendStepCurve(QLineSeries *series,
-                     const std::vector<BidSegment> &segments,
-                     bool sortAscendingByPrice,
-                     double startPower = 0.0)
+std::vector<BidSegment> collectSegments(const std::vector<Generator> &generators,
+                                        const std::vector<Consumer> &consumers)
 {
-    std::vector<BidSegment> sortedSegments = segments;
-    if (sortAscendingByPrice) {
-        std::sort(sortedSegments.begin(), sortedSegments.end(),
-                  [](const BidSegment &lhs, const BidSegment &rhs) {
-                      return lhs.priceYuanPerMwh() < rhs.priceYuanPerMwh();
-                  });
-    } else {
-        std::sort(sortedSegments.begin(), sortedSegments.end(),
-                  [](const BidSegment &lhs, const BidSegment &rhs) {
-                      return lhs.priceYuanPerMwh() > rhs.priceYuanPerMwh();
-                  });
+    std::vector<BidSegment> segments;
+    for (const Generator &generator : generators) {
+        const auto &source = generator.bidSheet().segments();
+        segments.insert(segments.end(), source.begin(), source.end());
     }
-
-    double cumulativePower = startPower;
-    for (const BidSegment &segment : sortedSegments) {
-        series->append(cumulativePower, segment.priceYuanPerMwh());
-        cumulativePower += segment.quantityMw();
-        series->append(cumulativePower, segment.priceYuanPerMwh());
+    for (const Consumer &consumer : consumers) {
+        const auto &source = consumer.bidSheet().segments();
+        segments.insert(segments.end(), source.begin(), source.end());
     }
+    return segments;
 }
 
-QChart *createPiecewiseChart(const Generator &generator, const Consumer &consumer)
+std::vector<BidSegment> collectSupplySegments(const std::vector<Generator> &generators)
 {
-    const std::vector<BidSegment> supplySegments = generator.bidSheet().segments();
-    const std::vector<BidSegment> demandSegments = consumer.bidSheet().segments();
+    std::vector<BidSegment> segments;
+    for (const Generator &generator : generators) {
+        const auto &source = generator.bidSheet().segments();
+        segments.insert(segments.end(), source.begin(), source.end());
+    }
+    return segments;
+}
+
+std::vector<BidSegment> collectDemandSegments(const std::vector<Consumer> &consumers)
+{
+    std::vector<BidSegment> segments;
+    for (const Consumer &consumer : consumers) {
+        const auto &source = consumer.bidSheet().segments();
+        segments.insert(segments.end(), source.begin(), source.end());
+    }
+    return segments;
+}
+
+QChart *createPiecewiseChart(const std::vector<Generator> &generators,
+                             const std::vector<Consumer> &consumers)
+{
+    const std::vector<BidSegment> supplyIncrements = collectSupplySegments(generators);
+    const std::vector<BidSegment> demandSegments = collectDemandSegments(consumers);
+    double sumPMin = 0.0;
+    for (const Generator &generator : generators) {
+        sumPMin += generator.pMinMw();
+    }
 
     auto *pminSeries = new QLineSeries;
     pminSeries->setName(QStringLiteral("Pmin 必发电量"));
     pminSeries->setPen(QPen(QColor(110, 110, 110), 2));
     pminSeries->append(0.0, 0.0);
-    pminSeries->append(generator.pMinMw(), 0.0);
+    pminSeries->append(sumPMin, 0.0);
 
     auto *supplySeries = new QLineSeries;
     supplySeries->setName(QStringLiteral("供给曲线"));
     supplySeries->setPen(QPen(QColor(0, 150, 80), 2));
-    supplySeries->append(generator.pMinMw(), 0.0);
-    appendStepCurve(supplySeries, supplySegments, true, generator.pMinMw());
+    supplySeries->append(sumPMin, 0.0);
+    appendStepCurve(supplySeries, supplyIncrements, true, sumPMin);
 
     auto *demandSeries = new QLineSeries;
     demandSeries->setName(QStringLiteral("需求曲线"));
@@ -193,7 +152,7 @@ QChart *createPiecewiseChart(const Generator &generator, const Consumer &consume
     appendStepCurve(demandSeries, demandSegments, false);
 
     auto *chart = new QChart;
-    chart->setTitle(QStringLiteral("分段报价供需曲线"));
+    chart->setTitle(QStringLiteral("多主体分段报价供需曲线"));
     chart->legend()->setVisible(true);
     chart->addSeries(pminSeries);
     chart->addSeries(supplySeries);
@@ -207,9 +166,8 @@ QChart *createPiecewiseChart(const Generator &generator, const Consumer &consume
     axisY->setTitleText(QStringLiteral("价格 (元/MWh)"));
     axisY->setLabelFormat(QStringLiteral("%.2f"));
 
-    const double maxX = std::max(generator.pMinMw() + totalQuantityMw(supplySegments),
-                                 totalQuantityMw(demandSegments));
-    const double maxY = std::max(maxPriceYuanPerMwh(supplySegments),
+    const double maxX = sumPMin + totalQuantityMw(supplyIncrements);
+    const double maxY = std::max(maxPriceYuanPerMwh(supplyIncrements),
                                  maxPriceYuanPerMwh(demandSegments));
     axisX->setRange(0.0, maxX > 0.0 ? maxX * 1.05 : 1.0);
     axisY->setRange(0.0, maxY > 0.0 ? maxY * 1.1 : 1.0);
@@ -222,71 +180,93 @@ QChart *createPiecewiseChart(const Generator &generator, const Consumer &consume
     supplySeries->attachAxis(axisY);
     demandSeries->attachAxis(axisX);
     demandSeries->attachAxis(axisY);
-
     return chart;
 }
 
-QChart *createQuadraticChart(const Generator &generator,
-                             const Consumer &consumer,
+QChart *createQuadraticChart(const std::vector<Generator> &generators,
+                             const std::vector<Consumer> &consumers,
                              double clearingPrice)
 {
-    const double a = generator.bidSheet().quadraticA();
-    const double b = generator.bidSheet().quadraticB();
-    const double pMin = generator.pMinMw();
-    const double pMax = generator.pMaxMw();
-    const double demandMw = consumer.fixedDemandMw();
+    auto *chart = new QChart;
+    chart->setTitle(QStringLiteral("二次曲线模式：边际成本与统一出清价"));
+    chart->legend()->setVisible(true);
 
-    auto *marginalCostSeries = new QLineSeries;
-    marginalCostSeries->setName(QStringLiteral("边际成本曲线"));
-    marginalCostSeries->setPen(QPen(QColor(0, 110, 180), 2));
+    double maxPower = 0.0;
+    double minPrice = 0.0;
+    double maxPrice = 0.0;
+    bool haveUnit = false;
+    std::vector<QLineSeries *> chartSeries;
 
-    constexpr int kSampleCount = 120;
-    for (int i = 0; i <= kSampleCount; ++i) {
-        const double power = pMin + (pMax - pMin) * static_cast<double>(i) / kSampleCount;
-        const double marginalCost = 2.0 * a * power + b;
-        marginalCostSeries->append(power, marginalCost);
+    for (const Generator &generator : generators) {
+        const double a = generator.bidSheet().quadraticA();
+        const double b = generator.bidSheet().quadraticB();
+        const double pMin = generator.pMinMw();
+        const double pMax = generator.pMaxMw();
+
+        auto *series = new QLineSeries;
+        series->setName(QString::fromStdString(generator.id()));
+        series->setPen(QPen(QColor(0, 110, 180), 2));
+        constexpr int kSampleCount = 120;
+        for (int i = 0; i <= kSampleCount; ++i) {
+            const double power = pMin + (pMax - pMin) * static_cast<double>(i) / kSampleCount;
+            const double marginalCost = 2.0 * a * power + b;
+            series->append(power, marginalCost);
+            if (!haveUnit) {
+                minPrice = marginalCost;
+                maxPrice = marginalCost;
+                haveUnit = true;
+            } else {
+                minPrice = std::min(minPrice, marginalCost);
+                maxPrice = std::max(maxPrice, marginalCost);
+            }
+        }
+        chart->addSeries(series);
+        chartSeries.push_back(series);
+        maxPower = std::max(maxPower, pMax);
     }
 
-    const double maxPower = std::max(pMax, demandMw);
+    double demandMw = 0.0;
+    for (const Consumer &consumer : consumers) {
+        demandMw += consumer.fixedDemandMw();
+    }
+    maxPower = std::max(maxPower, demandMw);
+
     auto *lambdaSeries = new QLineSeries;
     lambdaSeries->setName(QStringLiteral("统一出清价 λ"));
     lambdaSeries->setPen(QPen(QColor(220, 140, 30), 2, Qt::DashLine));
     lambdaSeries->append(0.0, clearingPrice);
     lambdaSeries->append(maxPower, clearingPrice);
 
-    const double minPrice = std::min(2.0 * a * pMin + b, clearingPrice);
-    const double maxPrice = std::max(2.0 * a * pMax + b, clearingPrice);
     auto *demandSeries = new QLineSeries;
     demandSeries->setName(QStringLiteral("需求 QD"));
     demandSeries->setPen(QPen(QColor(180, 40, 40), 2, Qt::DashLine));
     demandSeries->append(demandMw, minPrice);
     demandSeries->append(demandMw, maxPrice);
 
-    auto *chart = new QChart;
-    chart->setTitle(QStringLiteral("二次曲线模式：边际成本与统一出清价"));
-    chart->legend()->setVisible(true);
-    chart->addSeries(marginalCostSeries);
     chart->addSeries(lambdaSeries);
     chart->addSeries(demandSeries);
+    chartSeries.push_back(lambdaSeries);
+    chartSeries.push_back(demandSeries);
 
     auto *axisX = new QValueAxis;
     axisX->setTitleText(QStringLiteral("电量 (MW)"));
     axisX->setLabelFormat(QStringLiteral("%.0f"));
-    axisX->setRange(0.0, maxPower * 1.05);
+    axisX->setRange(0.0, maxPower > 0.0 ? maxPower * 1.05 : 1.0);
 
     auto *axisY = new QValueAxis;
     axisY->setTitleText(QStringLiteral("价格 (元/MWh)"));
     axisY->setLabelFormat(QStringLiteral("%.2f"));
-    axisY->setRange(minPrice * 0.95, maxPrice * 1.05);
+    const double yLow = std::min(minPrice, clearingPrice);
+    const double yHigh = std::max(maxPrice, clearingPrice);
+    axisY->setRange(yLow > 0.0 ? yLow * 0.95 : -1.0,
+                    yHigh > 0.0 ? yHigh * 1.05 : 1.0);
 
     chart->addAxis(axisX, Qt::AlignBottom);
     chart->addAxis(axisY, Qt::AlignLeft);
-    marginalCostSeries->attachAxis(axisX);
-    marginalCostSeries->attachAxis(axisY);
-    lambdaSeries->attachAxis(axisX);
-    lambdaSeries->attachAxis(axisY);
-    demandSeries->attachAxis(axisX);
-    demandSeries->attachAxis(axisY);
+    for (QLineSeries *series : chartSeries) {
+        series->attachAxis(axisX);
+        series->attachAxis(axisY);
+    }
     return chart;
 }
 
@@ -299,18 +279,24 @@ TradingCenterWidget::TradingCenterWidget(GeneratorWidget *generatorWidget,
       generatorWidget_(generatorWidget),
       consumerWidget_(consumerWidget)
 {
-    // 创建顶部数据准备区、时段控制区、中间图表区和底部结果操作区。
     auto *rootLayout = new QVBoxLayout(this);
     rootLayout->setContentsMargins(12, 12, 12, 12);
     rootLayout->setSpacing(10);
 
     auto *dataGroup = new QGroupBox(QStringLiteral("数据准备"), this);
-    auto *dataLayout = new QHBoxLayout(dataGroup);
-    importGeneratorButton_ = new QPushButton(QStringLiteral("导入机组参数(CSV)"), dataGroup);
-    importLoadButton_ = new QPushButton(QStringLiteral("导入负荷数据(CSV)"), dataGroup);
-    dataLayout->addWidget(importGeneratorButton_);
-    dataLayout->addWidget(importLoadButton_);
-    dataLayout->addStretch();
+    auto *dataLayout = new QGridLayout(dataGroup);
+    importGeneratorParametersButton_ =
+        new QPushButton(QStringLiteral("发电参数(CSV)"), dataGroup);
+    importGeneratorBidsButton_ =
+        new QPushButton(QStringLiteral("发电报价(CSV)"), dataGroup);
+    importConsumerParametersButton_ =
+        new QPushButton(QStringLiteral("用户参数(CSV)"), dataGroup);
+    importConsumerBidsButton_ =
+        new QPushButton(QStringLiteral("用户报价(CSV)"), dataGroup);
+    dataLayout->addWidget(importGeneratorParametersButton_, 0, 0);
+    dataLayout->addWidget(importGeneratorBidsButton_, 0, 1);
+    dataLayout->addWidget(importConsumerParametersButton_, 0, 2);
+    dataLayout->addWidget(importConsumerBidsButton_, 0, 3);
 
     auto *timeGroup = new QGroupBox(QStringLiteral("时段控制"), this);
     auto *timeLayout = new QHBoxLayout(timeGroup);
@@ -339,12 +325,14 @@ TradingCenterWidget::TradingCenterWidget(GeneratorWidget *generatorWidget,
     chartView_ = new QChartView(chart, this);
     chartView_->setRenderHint(QPainter::Antialiasing);
     chartView_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    chartView_->setMinimumHeight(320);
+    chartView_->setMinimumHeight(260);
     rootLayout->addWidget(chartView_, 3);
 
-    auto *resultsGroup = new QGroupBox(QStringLiteral("96 时段出清结果"), this);
+    auto *resultsGroup = new QGroupBox(QStringLiteral("出清结果"), this);
     auto *resultsLayout = new QVBoxLayout(resultsGroup);
-    resultsTable_ = new QTableWidget(0, 8, resultsGroup);
+    resultsTabs_ = new QTabWidget(resultsGroup);
+
+    resultsTable_ = new QTableWidget(0, 8, resultsTabs_);
     resultsTable_->setHorizontalHeaderLabels({
         QStringLiteral("时段"),
         QStringLiteral("出清价 (元/MWh)"),
@@ -357,12 +345,30 @@ TradingCenterWidget::TradingCenterWidget(GeneratorWidget *generatorWidget,
     });
     resultsTable_->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     resultsTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    resultsTable_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     resultsTable_->setMinimumHeight(140);
-    resultsLayout->addWidget(resultsTable_);
+
+    detailTable_ = new QTableWidget(0, 9, resultsTabs_);
+    detailTable_->setHorizontalHeaderLabels({
+        QStringLiteral("时段"),
+        QStringLiteral("类型"),
+        QStringLiteral("主体"),
+        QStringLiteral("出力/成交 (MW)"),
+        QStringLiteral("边际成本 (元/MWh)"),
+        QStringLiteral("收益 (元)"),
+        QStringLiteral("成本 (元)"),
+        QStringLiteral("利润 (元)"),
+        QStringLiteral("支付 (元)")
+    });
+    detailTable_->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    detailTable_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    detailTable_->setMinimumHeight(140);
+
+    resultsTabs_->addTab(resultsTable_, QStringLiteral("96时段汇总"));
+    resultsTabs_->addTab(detailTable_, QStringLiteral("当前时段主体明细"));
+    resultsLayout->addWidget(resultsTabs_);
     rootLayout->addWidget(resultsGroup, 2);
 
-    auto *resultGroup = new QGroupBox(QStringLiteral("出清结果"), this);
+    auto *resultGroup = new QGroupBox(QStringLiteral("当前出清结果"), this);
     auto *resultLayout = new QVBoxLayout(resultGroup);
     mcpLabel_ = new QLabel(QStringLiteral("统一出清电价 (MCP): 0.00 元/MWh"), resultGroup);
     totalVolumeLabel_ = new QLabel(QStringLiteral("总出清电量: 0.00 MW"), resultGroup);
@@ -397,10 +403,14 @@ TradingCenterWidget::TradingCenterWidget(GeneratorWidget *generatorWidget,
 
 void TradingCenterWidget::connectSignals()
 {
-    connect(importGeneratorButton_, &QPushButton::clicked,
+    connect(importGeneratorParametersButton_, &QPushButton::clicked,
             this, &TradingCenterWidget::importGeneratorParameters);
-    connect(importLoadButton_, &QPushButton::clicked,
-            this, &TradingCenterWidget::importLoadData);
+    connect(importGeneratorBidsButton_, &QPushButton::clicked,
+            this, &TradingCenterWidget::importGeneratorBids);
+    connect(importConsumerParametersButton_, &QPushButton::clicked,
+            this, &TradingCenterWidget::importConsumerParameters);
+    connect(importConsumerBidsButton_, &QPushButton::clicked,
+            this, &TradingCenterWidget::importConsumerBids);
     connect(singleClearButton_, &QPushButton::clicked,
             this, &TradingCenterWidget::runSinglePeriodClear);
     connect(batchClearButton_, &QPushButton::clicked,
@@ -413,76 +423,81 @@ void TradingCenterWidget::connectSignals()
 
 void TradingCenterWidget::importGeneratorParameters()
 {
-    // 弹出文件选择框，读取 CSV 后写入发电侧当前/对应时段。
     const QString filePath = QFileDialog::getOpenFileName(
         this,
-        QStringLiteral("导入机组参数"),
+        QStringLiteral("导入发电参数"),
         QString(),
         QStringLiteral("CSV 文件 (*.csv);;所有文件 (*)"));
+    if (filePath.isEmpty()) {
+        return;
+    }
 
-    if (!filePath.isEmpty()) {
-        QString errorMessage;
-        const std::vector<SlotSegments> slotGroups = parseSlotCsv(filePath, errorMessage);
-        if (!slotGroups.empty()) {
-            for (const SlotSegments &group : slotGroups) {
-                generatorWidget_->setSlotSegments(group.timeSlot - 1, group.segments);
-            }
-            QMessageBox::information(this,
-                                     QStringLiteral("导入成功"),
-                                     QStringLiteral("已导入 %1 个时段的发电报价。")
-                                         .arg(slotGroups.size()));
-            return;
-        }
-
-        errorMessage.clear();
-        const std::vector<BidSegment> segments = parseSegmentCsv(filePath, errorMessage);
-        if (!errorMessage.isEmpty()) {
-            QMessageBox::warning(this, QStringLiteral("导入失败"), errorMessage);
-            return;
-        }
-
-        generatorWidget_->setCurrentSlotSegments(segments);
-        QMessageBox::information(this,
-                                 QStringLiteral("导入成功"),
-                                 QStringLiteral("已导入 %1 段发电报价到当前时段。")
-                                     .arg(segments.size()));
+    QString errorMessage;
+    if (generatorWidget_->importParametersFromCsv(filePath, &errorMessage)) {
+        QMessageBox::information(this, QStringLiteral("导入成功"),
+                                 QStringLiteral("发电参数已替换为 CSV 中的机组。"));
+    } else {
+        QMessageBox::warning(this, QStringLiteral("导入失败"), errorMessage);
     }
 }
 
-void TradingCenterWidget::importLoadData()
+void TradingCenterWidget::importGeneratorBids()
 {
     const QString filePath = QFileDialog::getOpenFileName(
         this,
-        QStringLiteral("导入负荷数据"),
+        QStringLiteral("导入发电报价"),
         QString(),
         QStringLiteral("CSV 文件 (*.csv);;所有文件 (*)"));
+    if (filePath.isEmpty()) {
+        return;
+    }
 
-    if (!filePath.isEmpty()) {
-        QString errorMessage;
-        const std::vector<SlotSegments> slotGroups = parseSlotCsv(filePath, errorMessage);
-        if (!slotGroups.empty()) {
-            for (const SlotSegments &group : slotGroups) {
-                consumerWidget_->setSlotSegments(group.timeSlot - 1, group.segments);
-            }
-            QMessageBox::information(this,
-                                     QStringLiteral("导入成功"),
-                                     QStringLiteral("已导入 %1 个时段的负荷报价。")
-                                         .arg(slotGroups.size()));
-            return;
-        }
+    QString errorMessage;
+    if (generatorWidget_->importBidsFromCsv(filePath, &errorMessage)) {
+        QMessageBox::information(this, QStringLiteral("导入成功"),
+                                 QStringLiteral("发电报价已导入。"));
+    } else {
+        QMessageBox::warning(this, QStringLiteral("导入失败"), errorMessage);
+    }
+}
 
-        errorMessage.clear();
-        const std::vector<BidSegment> segments = parseSegmentCsv(filePath, errorMessage);
-        if (!errorMessage.isEmpty()) {
-            QMessageBox::warning(this, QStringLiteral("导入失败"), errorMessage);
-            return;
-        }
+void TradingCenterWidget::importConsumerParameters()
+{
+    const QString filePath = QFileDialog::getOpenFileName(
+        this,
+        QStringLiteral("导入用户参数"),
+        QString(),
+        QStringLiteral("CSV 文件 (*.csv);;所有文件 (*)"));
+    if (filePath.isEmpty()) {
+        return;
+    }
 
-        consumerWidget_->setCurrentSlotSegments(segments);
-        QMessageBox::information(this,
-                                 QStringLiteral("导入成功"),
-                                 QStringLiteral("已导入 %1 段负荷报价到当前时段。")
-                                     .arg(segments.size()));
+    QString errorMessage;
+    if (consumerWidget_->importParametersFromCsv(filePath, &errorMessage)) {
+        QMessageBox::information(this, QStringLiteral("导入成功"),
+                                 QStringLiteral("用户参数已替换为 CSV 中的用户。"));
+    } else {
+        QMessageBox::warning(this, QStringLiteral("导入失败"), errorMessage);
+    }
+}
+
+void TradingCenterWidget::importConsumerBids()
+{
+    const QString filePath = QFileDialog::getOpenFileName(
+        this,
+        QStringLiteral("导入用户报价"),
+        QString(),
+        QStringLiteral("CSV 文件 (*.csv);;所有文件 (*)"));
+    if (filePath.isEmpty()) {
+        return;
+    }
+
+    QString errorMessage;
+    if (consumerWidget_->importBidsFromCsv(filePath, &errorMessage)) {
+        QMessageBox::information(this, QStringLiteral("导入成功"),
+                                 QStringLiteral("用户报价已导入。"));
+    } else {
+        QMessageBox::warning(this, QStringLiteral("导入失败"), errorMessage);
     }
 }
 
@@ -520,17 +535,25 @@ void TradingCenterWidget::runClearForSlot(int slotIndex)
         return;
     }
 
-    // 从界面控件构建当前时段的模型输入，并调用交易中心出清。
-    const bool quadratic = modeCombo_->currentIndex() == 1;
-    Generator generator = generatorWidget_->buildGenerator(quadratic);
-    Consumer consumer = consumerWidget_->buildConsumer(quadratic);
-    generator.bidSheet().setTimeSlot(slotIndex);
-    consumer.bidSheet().setTimeSlot(slotIndex);
+    generatorWidget_->flushCurrentSlot();
+    consumerWidget_->flushCurrentSlot();
 
-    MarketInput input(slotIndex,
-                      quadratic ? MarketMode::Quadratic : MarketMode::Piecewise);
-    input.addGenerator(generator);
-    input.addConsumer(consumer);
+    const bool quadratic = modeCombo_->currentIndex() == 1;
+    const MarketMode mode = quadratic ? MarketMode::Quadratic : MarketMode::Piecewise;
+    const std::vector<Generator> generators =
+        generatorWidget_->buildGeneratorsForSlot(slotIndex, quadratic);
+    const std::vector<Consumer> consumers =
+        consumerWidget_->buildConsumersForSlot(slotIndex, quadratic);
+
+    MarketInput input(slotIndex, mode);
+    for (Generator generator : generators) {
+        generator.bidSheet().setTimeSlot(slotIndex);
+        input.addGenerator(generator);
+    }
+    for (Consumer consumer : consumers) {
+        consumer.bidSheet().setTimeSlot(slotIndex);
+        input.addConsumer(consumer);
+    }
 
     const MarketResult result = tradingCenter_.clear(input);
     mcpLabel_->setText(QStringLiteral("统一出清电价 (MCP): %1 元/MWh")
@@ -538,14 +561,21 @@ void TradingCenterWidget::runClearForSlot(int slotIndex)
     totalVolumeLabel_->setText(QStringLiteral("总出清电量: %1 MW")
                                    .arg(result.clearingVolumeMw(), 0, 'f', 2));
 
-    if (!result.feasible()) {
-        qDebug() << "Clearing not feasible:" << QString::fromStdString(result.message());
+    if (lastResults_.size() != 96) {
+        lastResults_.resize(96);
+    }
+    TimeSlotResult &slotResult = lastResults_[static_cast<std::size_t>(slotIndex)];
+    slotResult.input = input;
+    slotResult.market = result;
+    if (result.feasible()) {
+        slotResult.settlement = tradingCenter_.settle(input, result);
     }
 
-    chartView_->setChart(quadratic ? createQuadraticChart(generator,
-                                                          consumer,
+    chartView_->setChart(quadratic ? createQuadraticChart(generators,
+                                                          consumers,
                                                           result.clearingPriceYuanPerMwh())
-                                   : createPiecewiseChart(generator, consumer));
+                                   : createPiecewiseChart(generators, consumers));
+    refreshDetail(slotIndex);
 }
 
 void TradingCenterWidget::runBatchClearAllPeriods()
@@ -554,30 +584,37 @@ void TradingCenterWidget::runBatchClearAllPeriods()
         return;
     }
 
+    generatorWidget_->flushCurrentSlot();
+    consumerWidget_->flushCurrentSlot();
+
     const bool quadratic = modeCombo_->currentIndex() == 1;
     const MarketMode mode = quadratic ? MarketMode::Quadratic : MarketMode::Piecewise;
 
-    // 用 96 个时段的已保存数据分别构建输入。
     std::vector<MarketInput> inputs;
     inputs.reserve(96);
     for (int slot = 0; slot < 96; ++slot) {
-        Generator generator = generatorWidget_->buildGeneratorForSlot(slot, quadratic);
-        Consumer consumer = consumerWidget_->buildConsumerForSlot(slot, quadratic);
-        generator.bidSheet().setTimeSlot(slot);
-        consumer.bidSheet().setTimeSlot(slot);
+        const std::vector<Generator> generators =
+            generatorWidget_->buildGeneratorsForSlot(slot, quadratic);
+        const std::vector<Consumer> consumers =
+            consumerWidget_->buildConsumersForSlot(slot, quadratic);
 
         MarketInput input(slot, mode);
-        input.addGenerator(generator);
-        input.addConsumer(consumer);
+        for (Generator generator : generators) {
+            generator.bidSheet().setTimeSlot(slot);
+            input.addGenerator(generator);
+        }
+        for (Consumer consumer : consumers) {
+            consumer.bidSheet().setTimeSlot(slot);
+            input.addConsumer(consumer);
+        }
         inputs.push_back(input);
     }
 
-    const std::vector<TimeSlotResult> results = tradingCenter_.runDayAheadSimulation(inputs);
-    lastResults_ = results;
+    lastResults_ = tradingCenter_.runDayAheadSimulation(inputs);
 
-    resultsTable_->setRowCount(static_cast<int>(results.size()));
-    for (int row = 0; row < static_cast<int>(results.size()); ++row) {
-        const TimeSlotResult &item = results[static_cast<std::size_t>(row)];
+    resultsTable_->setRowCount(96);
+    for (int row = 0; row < 96; ++row) {
+        const TimeSlotResult &item = lastResults_[static_cast<std::size_t>(row)];
         const MarketResult &market = item.market;
         const SettlementResult &settlement = item.settlement;
 
@@ -600,59 +637,129 @@ void TradingCenterWidget::runBatchClearAllPeriods()
         resultsTable_->setItem(row, 7, new QTableWidgetItem(status));
     }
 
-    qDebug() << "Batch clearing finished:" << results.size() << "slots.";
+    refreshDetail(periodSpinBox_->value() - 1);
+    qDebug() << "Batch clearing finished:" << lastResults_.size() << "slots.";
+}
+
+void TradingCenterWidget::refreshDetail(int slotIndex)
+{
+    if (slotIndex < 0 || slotIndex >= 96 ||
+        lastResults_.size() != 96 ||
+        lastResults_[static_cast<std::size_t>(slotIndex)].market.timeSlot() != slotIndex) {
+        detailTable_->setRowCount(0);
+        return;
+    }
+
+    const TimeSlotResult &item = lastResults_[static_cast<std::size_t>(slotIndex)];
+    const MarketResult &market = item.market;
+    const SettlementResult &settlement = item.settlement;
+
+    if (!market.feasible()) {
+        detailTable_->setRowCount(1);
+        detailTable_->setItem(0, 0, new QTableWidgetItem(QString::number(slotIndex + 1)));
+        detailTable_->setItem(0, 1, new QTableWidgetItem(QStringLiteral("不可行")));
+        detailTable_->setItem(0, 2,
+            new QTableWidgetItem(QString::fromStdString(market.message())));
+        return;
+    }
+
+    const auto &generators = settlement.generatorSettlements();
+    const auto &consumers = settlement.consumerSettlements();
+    detailTable_->setRowCount(static_cast<int>(generators.size() + consumers.size()));
+
+    int row = 0;
+    for (std::size_t i = 0; i < generators.size(); ++i) {
+        const GeneratorSettlement &generator = generators[i];
+        detailTable_->setItem(row, 0, new QTableWidgetItem(QString::number(slotIndex + 1)));
+        detailTable_->setItem(row, 1, new QTableWidgetItem(QStringLiteral("发电")));
+        detailTable_->setItem(row, 2,
+            new QTableWidgetItem(QString::fromStdString(generator.generatorId)));
+        detailTable_->setItem(row, 3,
+            new QTableWidgetItem(formatNumber(generator.outputMw, 3)));
+        const double marginalCost =
+            i < market.generatorResults().size()
+                ? market.generatorResults()[i].marginalCostYuanPerMwh
+                : 0.0;
+        detailTable_->setItem(row, 4,
+            new QTableWidgetItem(marginalCost > 0.0 ? formatNumber(marginalCost, 3)
+                                                    : QString()));
+        detailTable_->setItem(row, 5,
+            new QTableWidgetItem(formatNumber(generator.revenueYuan, 3)));
+        detailTable_->setItem(row, 6,
+            new QTableWidgetItem(formatNumber(generator.costYuan, 3)));
+        detailTable_->setItem(row, 7,
+            new QTableWidgetItem(formatNumber(generator.profitYuan, 3)));
+        detailTable_->setItem(row, 8, new QTableWidgetItem(QString()));
+        ++row;
+    }
+
+    for (const ConsumerSettlement &consumer : consumers) {
+        detailTable_->setItem(row, 0, new QTableWidgetItem(QString::number(slotIndex + 1)));
+        detailTable_->setItem(row, 1, new QTableWidgetItem(QStringLiteral("用户")));
+        detailTable_->setItem(row, 2,
+            new QTableWidgetItem(QString::fromStdString(consumer.consumerId)));
+        detailTable_->setItem(row, 3,
+            new QTableWidgetItem(formatNumber(consumer.clearedDemandMw, 3)));
+        detailTable_->setItem(row, 4, new QTableWidgetItem(QString()));
+        detailTable_->setItem(row, 5, new QTableWidgetItem(QString()));
+        detailTable_->setItem(row, 6, new QTableWidgetItem(QString()));
+        detailTable_->setItem(row, 7, new QTableWidgetItem(QString()));
+        detailTable_->setItem(row, 8,
+            new QTableWidgetItem(formatNumber(consumer.paymentYuan, 3)));
+        ++row;
+    }
 }
 
 void TradingCenterWidget::exportResults()
 {
-    // 把最近一次 96 时段仿真结果写成 CSV 文件。
     const QString filePath = QFileDialog::getSaveFileName(
         this,
         QStringLiteral("导出最终出清结果"),
         QStringLiteral("clearing_result.csv"),
         QStringLiteral("CSV 文件 (*.csv);;所有文件 (*)"));
-
-    if (!filePath.isEmpty()) {
-        std::vector<CSVWriter::Row> rows;
-        rows.push_back({
-            "time_slot",
-            "clearing_price_yuan_per_mwh",
-            "clearing_volume_mw",
-            "shortage_mw",
-            "total_payment_yuan",
-            "total_revenue_yuan",
-            "balance_yuan",
-            "status"
-        });
-
-        for (const TimeSlotResult &item : lastResults_) {
-            const MarketResult &market = item.market;
-            const SettlementResult &settlement = item.settlement;
-            rows.push_back({
-                std::to_string(market.timeSlot() + 1),
-                formatNumber(market.clearingPriceYuanPerMwh(), 4).toStdString(),
-                formatNumber(market.clearingVolumeMw(), 4).toStdString(),
-                formatNumber(market.shortageMw(), 4).toStdString(),
-                formatNumber(settlement.totalPaymentYuan(), 4).toStdString(),
-                formatNumber(settlement.totalRevenueYuan(), 4).toStdString(),
-                formatNumber(settlement.balanceYuan(), 6).toStdString(),
-                market.feasible() ? "feasible" : "infeasible"
-            });
-        }
-
-        std::string errorMessage;
-        if (!CSVWriter::write(filePath.toStdString(), rows, errorMessage)) {
-            QMessageBox::warning(this,
-                                 QStringLiteral("导出失败"),
-                                 QString::fromStdString(errorMessage));
-            return;
-        }
-
-        QMessageBox::information(this,
-                                 QStringLiteral("导出成功"),
-                                 QStringLiteral("已导出 %1 个时段的出清结果。")
-                                     .arg(lastResults_.size()));
+    if (filePath.isEmpty()) {
+        return;
     }
+
+    std::vector<CSVWriter::Row> rows;
+    rows.push_back({
+        "time_slot",
+        "clearing_price_yuan_per_mwh",
+        "clearing_volume_mw",
+        "shortage_mw",
+        "total_payment_yuan",
+        "total_revenue_yuan",
+        "balance_yuan",
+        "status"
+    });
+
+    for (const TimeSlotResult &item : lastResults_) {
+        const MarketResult &market = item.market;
+        const SettlementResult &settlement = item.settlement;
+        rows.push_back({
+            std::to_string(market.timeSlot() + 1),
+            formatNumber(market.clearingPriceYuanPerMwh(), 4).toStdString(),
+            formatNumber(market.clearingVolumeMw(), 4).toStdString(),
+            formatNumber(market.shortageMw(), 4).toStdString(),
+            formatNumber(settlement.totalPaymentYuan(), 4).toStdString(),
+            formatNumber(settlement.totalRevenueYuan(), 4).toStdString(),
+            formatNumber(settlement.balanceYuan(), 6).toStdString(),
+            market.feasible() ? "feasible" : "infeasible"
+        });
+    }
+
+    std::string errorMessage;
+    if (!CSVWriter::write(filePath.toStdString(), rows, errorMessage)) {
+        QMessageBox::warning(this,
+                             QStringLiteral("导出失败"),
+                             QString::fromStdString(errorMessage));
+        return;
+    }
+
+    QMessageBox::information(this,
+                             QStringLiteral("导出成功"),
+                             QStringLiteral("已导出 %1 个时段的出清结果。")
+                                 .arg(lastResults_.size()));
 }
 
 } // namespace pms

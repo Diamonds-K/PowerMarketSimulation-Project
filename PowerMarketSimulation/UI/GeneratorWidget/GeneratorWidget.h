@@ -1,11 +1,13 @@
 #pragma once
 
 #include <array>
+#include <string>
 #include <vector>
 
 #include <QString>
 #include <QWidget>
 
+#include "Model/BidSegment/BidSegment.h"
 #include "Model/Generator/Generator.h"
 
 class QComboBox;
@@ -20,14 +22,18 @@ class QTableWidget;
 namespace pms {
 
 struct GeneratorSlotData {
-    QString id = QStringLiteral("G1");
-    double pMinMw = 20.0;
-    double pMaxMw = 100.0;
     bool quadraticMode = false;
     double quadraticA = 0.05;
     double quadraticB = 10.0;
     double quadraticC = 0.0;
     std::vector<BidSegment> segments;
+};
+
+struct GeneratorUnitData {
+    QString id = QStringLiteral("G1");
+    double pMinMw = 20.0;
+    double pMaxMw = 100.0;
+    std::array<GeneratorSlotData, 96> timeSlots;
 };
 
 class GeneratorWidget : public QWidget {
@@ -37,10 +43,17 @@ public:
     explicit GeneratorWidget(QWidget *parent = nullptr);
 
     Generator buildGenerator(bool quadratic) const;
-    Generator buildGeneratorForSlot(int slotIndex, bool quadratic) const;
+    std::vector<Generator> buildGenerators(bool quadratic) const;
+    std::vector<Generator> buildGeneratorsForSlot(int slotIndex, bool quadratic) const;
+
     void setTimeSlot(int displaySlot);
-    void setCurrentSlotSegments(const std::vector<BidSegment> &segments);
-    void setSlotSegments(int slotIndex, const std::vector<BidSegment> &segments);
+    void flushCurrentSlot();
+    bool importParametersFromCsv(const QString &filePath, QString *errorMessage = nullptr);
+    bool importBidsFromCsv(const QString &filePath, QString *errorMessage = nullptr);
+
+    bool addUnit();
+    bool removeCurrentUnit();
+    int unitCount() const;
 
 signals:
     void timeSlotChanged(int displaySlot);
@@ -48,17 +61,29 @@ signals:
 private slots:
     void submitCurrentSlot();
     void onTimeSlotChanged(int displaySlot);
+    void onUnitIndexChanged(int index);
+    void addUnitClicked();
+    void removeUnitClicked();
 
 private:
     QWidget *createLadderPage();
     QWidget *createQuadraticPage();
     void connectSignals();
-    void saveCurrentToSlot(int slotIndex);
+    void saveCurrentToSlot(int unitIndex, int slotIndex);
+    void saveCurrent();
+    void loadUnit(int unitIndex);
     void loadSlot(int slotIndex);
-    Generator buildFromData(const GeneratorSlotData &data, bool quadratic) const;
+    void clearSegmentTable();
+    Generator buildFromData(const GeneratorUnitData &unit,
+                            int slotIndex,
+                            bool quadratic) const;
     QString cellText(int row, int column) const;
+    bool idExists(const QString &id, int exceptIndex = -1) const;
+    QString nextDefaultUnitId() const;
 
     QComboBox *unitCombo_ = nullptr;
+    QPushButton *addUnitButton_ = nullptr;
+    QPushButton *removeUnitButton_ = nullptr;
     QSpinBox *timeSlotSpinBox_ = nullptr;
     QRadioButton *ladderModeRadio_ = nullptr;
     QRadioButton *quadraticModeRadio_ = nullptr;
@@ -73,8 +98,10 @@ private:
     QLabel *outputLabel_ = nullptr;
     QLabel *revenueLabel_ = nullptr;
 
-    std::array<GeneratorSlotData, 96> slotData_;
+    std::vector<GeneratorUnitData> units_;
+    int currentUnitIndex_ = 0;
     int currentSlotIndex_ = 0;
+    bool syncingUnit_ = false;
     bool syncingTimeSlot_ = false;
 };
 

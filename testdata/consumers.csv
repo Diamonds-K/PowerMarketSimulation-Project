@@ -1,0 +1,3 @@
+consumer_id,fixed_demand_mw,mode
+C1,60,piecewise
+C2,40,piecewise

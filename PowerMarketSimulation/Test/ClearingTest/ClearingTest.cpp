@@ -139,6 +139,35 @@ void testMultiGeneratorSortingAndDemandLimit() {
     assert(near(result.generatorResults()[1].outputMw, 60.0));
 }
 
+void testMultiGeneratorMultiConsumerClearing() {
+    const auto generator1 =
+        makeGenerator("G1", 20.0, 100.0, {{20.0, 200.0}, {30.0, 250.0}, {30.0, 300.0}});
+    const auto generator2 =
+        makeGenerator("G2", 10.0, 60.0, {{20.0, 220.0}, {30.0, 260.0}});
+    const auto consumer1 = makeConsumer("C1", {{40.0, 270.0}, {20.0, 250.0}});
+    const auto consumer2 = makeConsumer("C2", {{30.0, 260.0}, {20.0, 230.0}});
+    const auto input = makePiecewiseInput(
+        {generator1, generator2}, {consumer1, consumer2});
+
+    PiecewiseClearing clearing;
+    const MarketResult result = clearing.clear(input);
+
+    assert(result.feasible());
+    assert(near(result.clearingPriceYuanPerMwh(), 250.0));
+    assert(near(result.clearingVolumeMw(), 90.0));
+    assert(near(result.shortageMw(), 20.0));
+    assert(result.generatorResults().size() == 2);
+    assert(near(result.generatorResults()[0].outputMw, 60.0));
+    assert(near(result.generatorResults()[1].outputMw, 30.0));
+    assert(result.consumerResults().size() == 2);
+
+    double clearedDemand = 0.0;
+    for (const ConsumerResult &consumerResult : result.consumerResults()) {
+        clearedDemand += consumerResult.clearedDemandMw;
+    }
+    assert(near(clearedDemand, 90.0));
+}
+
 } // namespace
 
 int main() {
@@ -147,6 +176,7 @@ int main() {
     testNoTradeUsesLowestSellPrice();
     testDemandBelowSumPMinIsInfeasible();
     testMultiGeneratorSortingAndDemandLimit();
+    testMultiGeneratorMultiConsumerClearing();
 
     std::cout << "ClearingTest passed" << std::endl;
     return 0;
