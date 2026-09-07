@@ -146,7 +146,8 @@ double maxPriceYuanPerMwh(const std::vector<BidSegment> &segments)
 
 void appendStepCurve(QLineSeries *series,
                      const std::vector<BidSegment> &segments,
-                     bool sortAscendingByPrice)
+                     bool sortAscendingByPrice,
+                     double startPower = 0.0)
 {
     std::vector<BidSegment> sortedSegments = segments;
     if (sortAscendingByPrice) {
@@ -161,7 +162,7 @@ void appendStepCurve(QLineSeries *series,
                   });
     }
 
-    double cumulativePower = 0.0;
+    double cumulativePower = startPower;
     for (const BidSegment &segment : sortedSegments) {
         series->append(cumulativePower, segment.priceYuanPerMwh());
         cumulativePower += segment.quantityMw();
@@ -174,10 +175,16 @@ QChart *createPiecewiseChart(const Generator &generator, const Consumer &consume
     const std::vector<BidSegment> supplySegments = generator.bidSheet().segments();
     const std::vector<BidSegment> demandSegments = consumer.bidSheet().segments();
 
+    auto *pminSeries = new QLineSeries;
+    pminSeries->setName(QStringLiteral("Pmin 必发电量"));
+    pminSeries->setPen(QPen(QColor(110, 110, 110), 2));
+    pminSeries->append(0.0, 0.0);
+    pminSeries->append(generator.pMinMw(), 0.0);
+
     auto *supplySeries = new QLineSeries;
     supplySeries->setName(QStringLiteral("供给曲线"));
     supplySeries->setPen(QPen(QColor(0, 150, 80), 2));
-    appendStepCurve(supplySeries, supplySegments, true);
+    appendStepCurve(supplySeries, supplySegments, true, generator.pMinMw());
 
     auto *demandSeries = new QLineSeries;
     demandSeries->setName(QStringLiteral("需求曲线"));
@@ -187,6 +194,7 @@ QChart *createPiecewiseChart(const Generator &generator, const Consumer &consume
     auto *chart = new QChart;
     chart->setTitle(QStringLiteral("分段报价供需曲线"));
     chart->legend()->setVisible(true);
+    chart->addSeries(pminSeries);
     chart->addSeries(supplySeries);
     chart->addSeries(demandSeries);
 
@@ -198,7 +206,7 @@ QChart *createPiecewiseChart(const Generator &generator, const Consumer &consume
     axisY->setTitleText(QStringLiteral("价格 (元/MWh)"));
     axisY->setLabelFormat(QStringLiteral("%.2f"));
 
-    const double maxX = std::max(totalQuantityMw(supplySegments),
+    const double maxX = std::max(generator.pMinMw() + totalQuantityMw(supplySegments),
                                  totalQuantityMw(demandSegments));
     const double maxY = std::max(maxPriceYuanPerMwh(supplySegments),
                                  maxPriceYuanPerMwh(demandSegments));
@@ -207,6 +215,8 @@ QChart *createPiecewiseChart(const Generator &generator, const Consumer &consume
 
     chart->addAxis(axisX, Qt::AlignBottom);
     chart->addAxis(axisY, Qt::AlignLeft);
+    pminSeries->attachAxis(axisX);
+    pminSeries->attachAxis(axisY);
     supplySeries->attachAxis(axisX);
     supplySeries->attachAxis(axisY);
     demandSeries->attachAxis(axisX);

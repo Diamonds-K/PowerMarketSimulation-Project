@@ -59,6 +59,20 @@ MarketResult PiecewiseClearing::clear(const MarketInput& input) {
     std::vector<SegmentRef> generatorSegments = collectGeneratorSegments(input);
     std::vector<ConsumerRef> consumerSegments = collectConsumerSegments(input);
 
+    // 将 Pmin 作为价格为 0 的必发段插入卖方队列。
+    for (size_t i = 0; i < input.generators().size(); ++i) {
+        const double pMin = input.generators()[i].pMinMw();
+        if (pMin > kEpsilon) {
+            SegmentRef pminSegment;
+            pminSegment.generatorIndex = static_cast<int>(i);
+            pminSegment.segmentNo = 0;
+            pminSegment.quantityMw = pMin;
+            pminSegment.priceYuanPerMwh = 0.0;
+            pminSegment.isPMin = true;
+            generatorSegments.push_back(pminSegment);
+        }
+    }
+
     // 卖方价格从低到高排列。
     std::sort(generatorSegments.begin(), generatorSegments.end(),
               [](const SegmentRef& lhs, const SegmentRef& rhs) {
@@ -83,25 +97,10 @@ MarketResult PiecewiseClearing::clear(const MarketInput& input) {
                   return lhs.segmentNo < rhs.segmentNo;
               });
 
-    // Pmin 是必发电量，先按用户报价从高到低满足需求。
-    // 先把 Pmin 从用户需求段中扣除，再让增量段与剩余需求撮合。
-    std::vector<double> pminAllocatedMw(input.consumers().size(), 0.0);
-    double remainingPMin = sumPMin;
-    for (ConsumerRef& consumer : consumerSegments) {
-        if (remainingPMin <= kEpsilon) {
-            break;
-        }
-
-        const double allocated = std::min(consumer.quantityMw, remainingPMin);
-        consumer.quantityMw -= allocated;
-        remainingPMin -= allocated;
-        pminAllocatedMw[static_cast<std::size_t>(consumer.consumerIndex)] += allocated;
-    }
-
     // 双指针撮合：双方报价段都只向前移动，不回退。
     size_t sellIndex = 0;
     size_t buyIndex = 0;
-    double matchedIncrementMw = 0.0;
+    double matchedDemandMw = 0.0;
     double lastSellPrice = 0.0;
     bool hasTrade = false;
 
@@ -114,14 +113,17 @@ MarketResult PiecewiseClearing::clear(const MarketInput& input) {
             break;
         }
 
-        if (unitCumulative[sell.generatorIndex] + kEpsilon >= unitCapacity[sell.generatorIndex]) {
+        if (!sell.isPMin &&
+            unitCumulative[sell.generatorIndex] + kEpsilon >= unitCapacity[sell.generatorIndex]) {
             ++sellIndex;
             continue;
         }
 
-        const double remainingCapacity =
-            unitCapacity[sell.generatorIndex] - unitCumulative[sell.generatorIndex];
-        const double remainingDemand = totalDemand - (sumPMin + matchedIncrementMw);
+        const double remainingCapacity = sell.isPMin
+                                             ? sell.quantityMw
+                                             : unitCapacity[sell.generatorIndex] -
+                                                   unitCumulative[sell.generatorIndex];
+        const double remainingDemand = totalDemand - matchedDemandMw;
         double tradeMw = std::min({buy.quantityMw, sell.quantityMw, remainingCapacity});
         tradeMw = std::min(tradeMw, std::max(0.0, remainingDemand));
 
@@ -132,20 +134,24 @@ MarketResult PiecewiseClearing::clear(const MarketInput& input) {
         // 记录成交段、价格和双方剩余量。
         buy.quantityMw -= tradeMw;
         sell.quantityMw -= tradeMw;
-        unitCumulative[sell.generatorIndex] += tradeMw;
-        matchedIncrementMw += tradeMw;
+        matchedDemandMw += tradeMw;
 
-        GeneratorResult& generatorResult = generatorResults[sell.generatorIndex];
-        generatorResult.outputMw += tradeMw;
-        MatchedSegment matchedSegment;
-        matchedSegment.segmentNo = sell.segmentNo;
-        matchedSegment.quantityMw = tradeMw;
-        matchedSegment.priceYuanPerMwh = sell.priceYuanPerMwh;
-        generatorResult.matchedSegments.push_back(matchedSegment);
+        if (!sell.isPMin) {
+            unitCumulative[sell.generatorIndex] += tradeMw;
+
+            GeneratorResult& generatorResult = generatorResults[sell.generatorIndex];
+            generatorResult.outputMw += tradeMw;
+            MatchedSegment matchedSegment;
+            matchedSegment.segmentNo = sell.segmentNo;
+            matchedSegment.quantityMw = tradeMw;
+            matchedSegment.priceYuanPerMwh = sell.priceYuanPerMwh;
+            generatorResult.matchedSegments.push_back(matchedSegment);
+
+            lastSellPrice = sell.priceYuanPerMwh;
+            hasTrade = true;
+        }
 
         consumerResults[buy.consumerIndex].clearedDemandMw += tradeMw;
-        lastSellPrice = sell.priceYuanPerMwh;
-        hasTrade = true;
 
         if (buy.quantityMw <= kEpsilon) {
             ++buyIndex;
@@ -155,16 +161,16 @@ MarketResult PiecewiseClearing::clear(const MarketInput& input) {
         }
     }
 
-    // 把已经分配给用户的 Pmin 电量加回到用户成交结果中。
-    for (size_t i = 0; i < input.consumers().size(); ++i) {
-        consumerResults[i].clearedDemandMw += pminAllocatedMw[i];
-    }
-
-    double totalClearedMw = sumPMin + matchedIncrementMw;
+    double totalClearedMw = matchedDemandMw;
     // 统一出清价取最后成交的发电段价格。
     double clearingPrice = hasTrade ? lastSellPrice : 0.0;
-    if (!hasTrade && !generatorSegments.empty()) {
-        clearingPrice = generatorSegments.front().priceYuanPerMwh;
+    if (!hasTrade) {
+        for (const SegmentRef& segment : generatorSegments) {
+            if (!segment.isPMin) {
+                clearingPrice = segment.priceYuanPerMwh;
+                break;
+            }
+        }
     }
     const double shortage = std::max(0.0, totalDemand - totalClearedMw);
 
