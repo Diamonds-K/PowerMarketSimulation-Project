@@ -38,8 +38,8 @@ GeneratorUnitData makeDefaultUnit(const QString &id)
 
     for (GeneratorSlotData &slot : unit.timeSlots) {
         slot.quadraticMode = false;
-        slot.quadraticA = 0.05;
-        slot.quadraticB = 10.0;
+        slot.quadraticA = 5.0 / 6.0;
+        slot.quadraticB = 400.0 / 3.0;
         slot.quadraticC = 0.0;
         slot.segments = {
             BidSegment(1, 20.0, 200.0),
@@ -72,6 +72,62 @@ bool isBidHeader(const std::vector<std::string> &row)
     }
     return row.front() == "owner_id" || row.front() == "generator_id" ||
            row.front() == "consumer_id";
+}
+
+struct QuadraticFitResult {
+    double a = 0.05;
+    double b = 10.0;
+    double c = 0.0;
+};
+
+QuadraticFitResult fitLadderToQuadratic(double pMin,
+                                        double pMax,
+                                        const std::vector<BidSegment> &segments)
+{
+    QuadraticFitResult result;
+    if (segments.empty()) {
+        return result;
+    }
+
+    // 把每段报价看成该段上边界处的边际成本点，再对 MC=2aP+b 做最小二乘拟合。
+    std::vector<std::pair<double, double>> points;
+    double cumulativePower = 0.0;
+    for (const BidSegment &segment : segments) {
+        cumulativePower += segment.quantityMw();
+        const double power = std::min(pMin + cumulativePower, pMax);
+        points.push_back({power, segment.priceYuanPerMwh()});
+    }
+    const double lastPrice = segments.back().priceYuanPerMwh();
+    if (points.empty() || points.back().first < pMax - 1e-9) {
+        points.push_back({pMax, lastPrice});
+    }
+
+    if (points.size() < 2) {
+        points.push_back({pMin, lastPrice});
+    }
+
+    double sumX = 0.0;
+    double sumY = 0.0;
+    for (const auto &point : points) {
+        sumX += point.first;
+        sumY += point.second;
+    }
+    const double meanX = sumX / static_cast<double>(points.size());
+    const double meanY = sumY / static_cast<double>(points.size());
+
+    double numerator = 0.0;
+    double denominator = 0.0;
+    for (const auto &point : points) {
+        numerator += (point.first - meanX) * (point.second - meanY);
+        denominator += (point.first - meanX) * (point.first - meanX);
+    }
+
+    const double slope = denominator > 1e-12 ? numerator / denominator : 0.0;
+    const double minA = 1e-6;
+    result.a = std::max(slope / 2.0, minA);
+    result.b = meanY - slope * meanX;
+    result.c = 0.0;
+    return result;
 }
 
 } // namespace
@@ -273,6 +329,14 @@ void GeneratorWidget::saveCurrentToSlot(int unitIndex, int slotIndex)
         if (quantity > 0.0 && price >= 0.0) {
             slot.segments.push_back(BidSegment(row + 1, quantity, price));
         }
+    }
+
+    if (!slot.quadraticMode && !slot.segments.empty()) {
+        const QuadraticFitResult fit =
+            fitLadderToQuadratic(unit.pMinMw, unit.pMaxMw, slot.segments);
+        slot.quadraticA = fit.a;
+        slot.quadraticB = fit.b;
+        slot.quadraticC = fit.c;
     }
 }
 
@@ -510,24 +574,34 @@ bool GeneratorWidget::importParametersFromCsv(const QString &filePath,
             continue;
         }
 
-        GeneratorUnitData unit;
-        unit.id = id;
+        // 复用默认机组，预填每个时段的阶梯报价，避免“参数导入后表格为空”。
+        // 二次成本模式不需要阶梯段，清掉即可。
+        GeneratorUnitData unit = makeDefaultUnit(id);
         unit.pMinMw = pMin;
         unit.pMaxMw = pMax;
         for (GeneratorSlotData &slot : unit.timeSlots) {
             slot.quadraticMode = (mode == QStringLiteral("quadratic"));
+            if (slot.quadraticMode) {
+                slot.segments.clear();
+            }
         }
         seenIds.insert(id);
         nextUnits.push_back(unit);
     }
 
-    if (!errors.isEmpty() || nextUnits.empty()) {
+    // 只要存在至少一条合法参数就替换成功；非法行通过 errorMessage 汇总提示。
+    if (nextUnits.empty()) {
         if (errorMessage) {
             *errorMessage = errors.isEmpty()
                                 ? QStringLiteral("发电参数 CSV 没有有效数据")
                                 : errors.join(QStringLiteral("\n"));
         }
         return false;
+    }
+
+    if (!errors.isEmpty() && errorMessage) {
+        *errorMessage = QStringLiteral("以下发电参数行被跳过：\n") +
+                        errors.join(QStringLiteral("\n"));
     }
 
     units_ = std::move(nextUnits);
@@ -602,13 +676,20 @@ bool GeneratorWidget::importBidsFromCsv(const QString &filePath,
         records.push_back(record);
     }
 
-    if (!errors.isEmpty() || records.empty()) {
+    // 只要存在至少一条合法报价就导入；被跳过的坏行通过 errorMessage 汇总提示，
+    // 避免“一行坏数据导致整批清空”的体验问题。
+    if (records.empty()) {
         if (errorMessage) {
             *errorMessage = errors.isEmpty()
                                 ? QStringLiteral("发电报价 CSV 没有有效数据")
                                 : errors.join(QStringLiteral("\n"));
         }
         return false;
+    }
+
+    if (!errors.isEmpty() && errorMessage) {
+        *errorMessage = QStringLiteral("以下发电报价行被跳过：\n") +
+                        errors.join(QStringLiteral("\n"));
     }
 
     std::map<std::pair<QString, int>, std::vector<BidSegment>> grouped;
@@ -631,7 +712,14 @@ bool GeneratorWidget::importBidsFromCsv(const QString &filePath,
         const int slot = entry.first.second;
         for (GeneratorUnitData &unit : units_) {
             if (unit.id == id) {
-                unit.timeSlots[static_cast<std::size_t>(slot)].segments = entry.second;
+                GeneratorSlotData &slotData =
+                    unit.timeSlots[static_cast<std::size_t>(slot)];
+                slotData.segments = entry.second;
+                const QuadraticFitResult fit =
+                    fitLadderToQuadratic(unit.pMinMw, unit.pMaxMw, slotData.segments);
+                slotData.quadraticA = fit.a;
+                slotData.quadraticB = fit.b;
+                slotData.quadraticC = fit.c;
             }
         }
     }

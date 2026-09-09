@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "Clearing/PiecewiseClearing/PiecewiseClearing.h"
+#include "Clearing/QuadraticClearing/QuadraticClearing.h"
 #include "Model/Consumer/Consumer.h"
 #include "Model/Generator/Generator.h"
 #include "Model/MarketInput/MarketInput.h"
@@ -168,6 +169,38 @@ void testMultiGeneratorMultiConsumerClearing() {
     assert(near(clearedDemand, 90.0));
 }
 
+void testLadderQuadraticConsistency() {
+    const auto generator =
+        makeGenerator("G1", 20.0, 100.0, {{20.0, 200.0}, {30.0, 250.0}, {30.0, 300.0}});
+    const auto consumer = makeConsumer("C1", {{70.0, 300.0}});
+    const auto input = makePiecewiseInput({generator}, {consumer});
+
+    PiecewiseClearing piecewise;
+    const MarketResult piecewiseResult = piecewise.clear(input);
+    assert(piecewiseResult.feasible());
+    assert(near(piecewiseResult.clearingPriceYuanPerMwh(), 250.0));
+    assert(near(piecewiseResult.clearingVolumeMw(), 70.0));
+    assert(near(piecewiseResult.generatorResults()[0].outputMw, 70.0));
+
+    Generator quadraticGenerator("G1", 20.0, 100.0);
+    BidSheet quadraticSheet;
+    quadraticSheet.setMode(BidSheet::Mode::Quadratic);
+    quadraticSheet.setOwnerId("G1");
+    quadraticSheet.setQuadraticCoefficients(5.0 / 6.0, 400.0 / 3.0, 0.0);
+    quadraticGenerator.setBidSheet(quadraticSheet);
+
+    MarketInput quadraticInput(0, MarketMode::Quadratic);
+    quadraticInput.addGenerator(quadraticGenerator);
+    quadraticInput.addConsumer(Consumer("C1", 70.0));
+
+    QuadraticClearing quadratic;
+    const MarketResult quadraticResult = quadratic.clear(quadraticInput);
+    assert(quadraticResult.feasible());
+    assert(near(quadraticResult.clearingPriceYuanPerMwh(), 250.0));
+    assert(near(quadraticResult.clearingVolumeMw(), 70.0));
+    assert(near(quadraticResult.generatorResults()[0].outputMw, 70.0));
+}
+
 } // namespace
 
 int main() {
@@ -177,6 +210,7 @@ int main() {
     testDemandBelowSumPMinIsInfeasible();
     testMultiGeneratorSortingAndDemandLimit();
     testMultiGeneratorMultiConsumerClearing();
+    testLadderQuadraticConsistency();
 
     std::cout << "ClearingTest passed" << std::endl;
     return 0;

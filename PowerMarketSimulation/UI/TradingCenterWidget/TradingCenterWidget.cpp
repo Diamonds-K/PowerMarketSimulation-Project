@@ -24,6 +24,7 @@
 #include <QPainter>
 #include <QPen>
 #include <QPushButton>
+#include <QScatterSeries>
 #include <QSpinBox>
 #include <QTabWidget>
 #include <QTableWidget>
@@ -42,6 +43,18 @@ namespace {
 QString formatNumber(double value, int precision = 2)
 {
     return QString::number(value, 'f', precision);
+}
+
+void showImportOutcome(QWidget *parent,
+                       const QString &successTitle,
+                       const QString &successMessage,
+                       const QString &warningMessage)
+{
+    if (warningMessage.isEmpty()) {
+        QMessageBox::information(parent, successTitle, successMessage);
+    } else {
+        QMessageBox::warning(parent, QStringLiteral("部分导入"), warningMessage);
+    }
 }
 
 void appendStepCurve(QLineSeries *series,
@@ -185,23 +198,38 @@ QChart *createPiecewiseChart(const std::vector<Generator> &generators,
 
 QChart *createQuadraticChart(const std::vector<Generator> &generators,
                              const std::vector<Consumer> &consumers,
-                             double clearingPrice)
+                             const MarketResult &result)
 {
     auto *chart = new QChart;
-    chart->setTitle(QStringLiteral("二次曲线模式：边际成本与统一出清价"));
+    if (result.feasible()) {
+        chart->setTitle(QStringLiteral("二次曲线模式：边际成本、聚合供给与统一出清价"));
+    } else {
+        chart->setTitle(QStringLiteral("二次曲线模式：不可行 - ") +
+                        QString::fromStdString(result.message()));
+    }
     chart->legend()->setVisible(true);
 
-    double maxPower = 0.0;
+    double clearingPrice = result.clearingPriceYuanPerMwh();
+    double sumPMax = 0.0;
     double minPrice = 0.0;
     double maxPrice = 0.0;
     bool haveUnit = false;
     std::vector<QLineSeries *> chartSeries;
+    std::vector<double> unitA;
+    std::vector<double> unitB;
+    std::vector<double> unitPMin;
+    std::vector<double> unitPMax;
 
     for (const Generator &generator : generators) {
         const double a = generator.bidSheet().quadraticA();
         const double b = generator.bidSheet().quadraticB();
         const double pMin = generator.pMinMw();
         const double pMax = generator.pMaxMw();
+        unitA.push_back(a);
+        unitB.push_back(b);
+        unitPMin.push_back(pMin);
+        unitPMax.push_back(pMax);
+        sumPMax += pMax;
 
         auto *series = new QLineSeries;
         series->setName(QString::fromStdString(generator.id()));
@@ -222,31 +250,67 @@ QChart *createQuadraticChart(const std::vector<Generator> &generators,
         }
         chart->addSeries(series);
         chartSeries.push_back(series);
-        maxPower = std::max(maxPower, pMax);
     }
 
     double demandMw = 0.0;
     for (const Consumer &consumer : consumers) {
         demandMw += consumer.fixedDemandMw();
     }
-    maxPower = std::max(maxPower, demandMw);
 
-    auto *lambdaSeries = new QLineSeries;
-    lambdaSeries->setName(QStringLiteral("统一出清价 λ"));
-    lambdaSeries->setPen(QPen(QColor(220, 140, 30), 2, Qt::DashLine));
-    lambdaSeries->append(0.0, clearingPrice);
-    lambdaSeries->append(maxPower, clearingPrice);
+    if (haveUnit) {
+        auto *aggregateSeries = new QLineSeries;
+        aggregateSeries->setName(QStringLiteral("聚合供给"));
+        aggregateSeries->setPen(QPen(QColor(0, 140, 70), 2));
+        constexpr int kPriceSampleCount = 240;
+        for (int i = 0; i <= kPriceSampleCount; ++i) {
+            const double price =
+                minPrice + (maxPrice - minPrice) * static_cast<double>(i) / kPriceSampleCount;
+            double totalPower = 0.0;
+            for (std::size_t j = 0; j < unitA.size(); ++j) {
+                const double power = (price - unitB[j]) / (2.0 * unitA[j]);
+                totalPower += std::clamp(power, unitPMin[j], unitPMax[j]);
+            }
+            aggregateSeries->append(totalPower, price);
+        }
+        chart->addSeries(aggregateSeries);
+        chartSeries.push_back(aggregateSeries);
+    }
+
+    const double maxPower = std::max(sumPMax, demandMw);
 
     auto *demandSeries = new QLineSeries;
     demandSeries->setName(QStringLiteral("需求 QD"));
     demandSeries->setPen(QPen(QColor(180, 40, 40), 2, Qt::DashLine));
     demandSeries->append(demandMw, minPrice);
     demandSeries->append(demandMw, maxPrice);
-
-    chart->addSeries(lambdaSeries);
     chart->addSeries(demandSeries);
-    chartSeries.push_back(lambdaSeries);
     chartSeries.push_back(demandSeries);
+
+    QLineSeries *lambdaSeries = nullptr;
+    if (result.feasible()) {
+        lambdaSeries = new QLineSeries;
+        lambdaSeries->setName(QStringLiteral("统一出清价 λ"));
+        lambdaSeries->setPen(QPen(QColor(220, 140, 30), 2, Qt::DashLine));
+        lambdaSeries->append(0.0, clearingPrice);
+        lambdaSeries->append(maxPower > 0.0 ? maxPower : 1.0, clearingPrice);
+        chart->addSeries(lambdaSeries);
+        chartSeries.push_back(lambdaSeries);
+    }
+
+    auto *dispatchSeries = new QScatterSeries;
+    dispatchSeries->setName(QStringLiteral("实际出力点"));
+    dispatchSeries->setColor(QColor(255, 80, 0));
+    dispatchSeries->setMarkerSize(9.0);
+    if (result.feasible() &&
+        result.generatorResults().size() == generators.size()) {
+        for (std::size_t i = 0; i < generators.size(); ++i) {
+            const double output = result.generatorResults()[i].outputMw;
+            const double marginalCost =
+                2.0 * unitA[i] * output + unitB[i];
+            dispatchSeries->append(output, marginalCost);
+        }
+    }
+    chart->addSeries(dispatchSeries);
 
     auto *axisX = new QValueAxis;
     axisX->setTitleText(QStringLiteral("电量 (MW)"));
@@ -256,8 +320,12 @@ QChart *createQuadraticChart(const std::vector<Generator> &generators,
     auto *axisY = new QValueAxis;
     axisY->setTitleText(QStringLiteral("价格 (元/MWh)"));
     axisY->setLabelFormat(QStringLiteral("%.2f"));
-    const double yLow = std::min(minPrice, clearingPrice);
-    const double yHigh = std::max(maxPrice, clearingPrice);
+    double yLow = minPrice;
+    double yHigh = maxPrice;
+    if (result.feasible()) {
+        yLow = std::min(yLow, clearingPrice);
+        yHigh = std::max(yHigh, clearingPrice);
+    }
     axisY->setRange(yLow > 0.0 ? yLow * 0.95 : -1.0,
                     yHigh > 0.0 ? yHigh * 1.05 : 1.0);
 
@@ -267,6 +335,8 @@ QChart *createQuadraticChart(const std::vector<Generator> &generators,
         series->attachAxis(axisX);
         series->attachAxis(axisY);
     }
+    dispatchSeries->attachAxis(axisX);
+    dispatchSeries->attachAxis(axisY);
     return chart;
 }
 
@@ -434,8 +504,9 @@ void TradingCenterWidget::importGeneratorParameters()
 
     QString errorMessage;
     if (generatorWidget_->importParametersFromCsv(filePath, &errorMessage)) {
-        QMessageBox::information(this, QStringLiteral("导入成功"),
-                                 QStringLiteral("发电参数已替换为 CSV 中的机组。"));
+        showImportOutcome(this, QStringLiteral("导入成功"),
+                          QStringLiteral("发电参数已替换为 CSV 中的机组。"),
+                          errorMessage);
     } else {
         QMessageBox::warning(this, QStringLiteral("导入失败"), errorMessage);
     }
@@ -454,8 +525,9 @@ void TradingCenterWidget::importGeneratorBids()
 
     QString errorMessage;
     if (generatorWidget_->importBidsFromCsv(filePath, &errorMessage)) {
-        QMessageBox::information(this, QStringLiteral("导入成功"),
-                                 QStringLiteral("发电报价已导入。"));
+        showImportOutcome(this, QStringLiteral("导入成功"),
+                          QStringLiteral("发电报价已导入。"),
+                          errorMessage);
     } else {
         QMessageBox::warning(this, QStringLiteral("导入失败"), errorMessage);
     }
@@ -474,8 +546,9 @@ void TradingCenterWidget::importConsumerParameters()
 
     QString errorMessage;
     if (consumerWidget_->importParametersFromCsv(filePath, &errorMessage)) {
-        QMessageBox::information(this, QStringLiteral("导入成功"),
-                                 QStringLiteral("用户参数已替换为 CSV 中的用户。"));
+        showImportOutcome(this, QStringLiteral("导入成功"),
+                          QStringLiteral("用户参数已替换为 CSV 中的用户。"),
+                          errorMessage);
     } else {
         QMessageBox::warning(this, QStringLiteral("导入失败"), errorMessage);
     }
@@ -494,8 +567,9 @@ void TradingCenterWidget::importConsumerBids()
 
     QString errorMessage;
     if (consumerWidget_->importBidsFromCsv(filePath, &errorMessage)) {
-        QMessageBox::information(this, QStringLiteral("导入成功"),
-                                 QStringLiteral("用户报价已导入。"));
+        showImportOutcome(this, QStringLiteral("导入成功"),
+                          QStringLiteral("用户报价已导入。"),
+                          errorMessage);
     } else {
         QMessageBox::warning(this, QStringLiteral("导入失败"), errorMessage);
     }
@@ -556,10 +630,15 @@ void TradingCenterWidget::runClearForSlot(int slotIndex)
     }
 
     const MarketResult result = tradingCenter_.clear(input);
-    mcpLabel_->setText(QStringLiteral("统一出清电价 (MCP): %1 元/MWh")
-                           .arg(result.clearingPriceYuanPerMwh(), 0, 'f', 2));
-    totalVolumeLabel_->setText(QStringLiteral("总出清电量: %1 MW")
-                                   .arg(result.clearingVolumeMw(), 0, 'f', 2));
+    if (result.feasible()) {
+        mcpLabel_->setText(QStringLiteral("统一出清电价 (MCP): %1 元/MWh")
+                               .arg(result.clearingPriceYuanPerMwh(), 0, 'f', 2));
+        totalVolumeLabel_->setText(QStringLiteral("总出清电量: %1 MW")
+                                       .arg(result.clearingVolumeMw(), 0, 'f', 2));
+    } else {
+        mcpLabel_->setText(QStringLiteral("统一出清电价 (MCP): 不可行"));
+        totalVolumeLabel_->setText(QStringLiteral("总出清电量: 不可行"));
+    }
 
     if (lastResults_.size() != 96) {
         lastResults_.resize(96);
@@ -573,7 +652,7 @@ void TradingCenterWidget::runClearForSlot(int slotIndex)
 
     chartView_->setChart(quadratic ? createQuadraticChart(generators,
                                                           consumers,
-                                                          result.clearingPriceYuanPerMwh())
+                                                          result)
                                    : createPiecewiseChart(generators, consumers));
     refreshDetail(slotIndex);
 }

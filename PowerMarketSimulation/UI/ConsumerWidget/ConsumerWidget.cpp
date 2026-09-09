@@ -407,22 +407,32 @@ bool ConsumerWidget::importParametersFromCsv(const QString &filePath,
             continue;
         }
 
-        ConsumerUnitData unit;
-        unit.id = id;
+        // 复用默认用户，预填每个时段的阶梯需求，避免“参数导入后表格为空”。
+        // 二次需求模式不需要阶梯段，清掉即可。
+        ConsumerUnitData unit = makeDefaultUnit(id);
         for (ConsumerSlotData &slot : unit.timeSlots) {
             slot.fixedDemandMw = fixedDemand;
+            if (mode == QStringLiteral("quadratic")) {
+                slot.segments.clear();
+            }
         }
         seenIds.insert(id);
         nextUnits.push_back(unit);
     }
 
-    if (!errors.isEmpty() || nextUnits.empty()) {
+    // 只要存在至少一条合法参数就替换成功；非法行通过 errorMessage 汇总提示。
+    if (nextUnits.empty()) {
         if (errorMessage) {
             *errorMessage = errors.isEmpty()
                                 ? QStringLiteral("用户参数 CSV 没有有效数据")
                                 : errors.join(QStringLiteral("\n"));
         }
         return false;
+    }
+
+    if (!errors.isEmpty() && errorMessage) {
+        *errorMessage = QStringLiteral("以下用户参数行被跳过：\n") +
+                        errors.join(QStringLiteral("\n"));
     }
 
     units_ = std::move(nextUnits);
@@ -497,13 +507,19 @@ bool ConsumerWidget::importBidsFromCsv(const QString &filePath,
         records.push_back(record);
     }
 
-    if (!errors.isEmpty() || records.empty()) {
+    // 只要存在至少一条合法报价就导入；被跳过的坏行通过 errorMessage 汇总提示。
+    if (records.empty()) {
         if (errorMessage) {
             *errorMessage = errors.isEmpty()
                                 ? QStringLiteral("用户报价 CSV 没有有效数据")
                                 : errors.join(QStringLiteral("\n"));
         }
         return false;
+    }
+
+    if (!errors.isEmpty() && errorMessage) {
+        *errorMessage = QStringLiteral("以下用户报价行被跳过：\n") +
+                        errors.join(QStringLiteral("\n"));
     }
 
     std::map<std::pair<QString, int>, std::vector<BidSegment>> grouped;
