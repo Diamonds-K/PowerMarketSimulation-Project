@@ -8,7 +8,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets Sql)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Sql Charts)
 
 set(PMS_CORE_SOURCES
     Model/BidSegment/BidSegment.cpp
@@ -41,7 +41,7 @@ add_executable(PowerMarketSimulation
     UI/ConsumerWidget/ConsumerWidget.cpp
     UI/TradingCenterWidget/TradingCenterWidget.cpp
 )
-target_link_libraries(PowerMarketSimulation PRIVATE pms_core Qt6::Widgets)
+target_link_libraries(PowerMarketSimulation PRIVATE pms_core Qt6::Widgets Qt6::Charts)
 
 enable_testing()
 
@@ -56,3 +56,9 @@ add_test(NAME SettlementTest COMMAND SettlementTest)
 add_executable(OptimizationTest Test/OptimizationTest/OptimizationTest.cpp)
 target_link_libraries(OptimizationTest PRIVATE pms_core)
 add_test(NAME OptimizationTest COMMAND OptimizationTest)
+
+get_filename_component(PMS_COMPILER_RUNTIME_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
+get_filename_component(PMS_QT_RUNTIME_DIR "${Qt6_DIR}/../../../bin" ABSOLUTE)
+set_tests_properties(ClearingTest SettlementTest OptimizationTest PROPERTIES
+    ENVIRONMENT_MODIFICATION
+        "PATH=path_list_prepend:${PMS_COMPILER_RUNTIME_DIR};PATH=path_list_prepend:${PMS_QT_RUNTIME_DIR}")

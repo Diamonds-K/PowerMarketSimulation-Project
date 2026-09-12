@@ -63,6 +63,7 @@ std::vector<std::string> ValidationReport::messages() const {
 ValidationReport BidValidator::validate(const MarketInput& input) {
     ValidationReport report;
 
+    // 每个时段至少需要一台机组和一个用户。
     if (input.generators().empty()) {
         report.addIssue(issue(ValidationIssue::Severity::Error,
                               "NO_GENERATOR",
@@ -128,6 +129,7 @@ ValidationReport BidValidator::validateBidSheet(const BidSheet& bidSheet,
     ValidationReport report;
     const std::string target = "BidSheet:" + bidSheet.ownerId();
 
+    // 二次模式只检查系数；分段模式检查段数和单调性。
     if (bidSheet.mode() == BidSheet::Mode::Quadratic) {
         if (generatorSide && bidSheet.quadraticA() <= 0.0) {
             report.addIssue(issue(ValidationIssue::Severity::Error,
@@ -164,6 +166,7 @@ ValidationReport BidValidator::validateBidSheet(const BidSheet& bidSheet,
         const double previous = segments[i - 1].priceYuanPerMwh();
         const double current = segments[i].priceYuanPerMwh();
         if (generatorSide) {
+            // 发电侧价格必须单调不减。
             if (current + kEpsilon < previous) {
                 report.addIssue(issue(ValidationIssue::Severity::Error,
                                       "NON_MONOTONE_SELL",
@@ -172,6 +175,7 @@ ValidationReport BidValidator::validateBidSheet(const BidSheet& bidSheet,
                 break;
             }
         } else {
+            // 用户侧价格必须单调不增。
             if (current - kEpsilon > previous) {
                 report.addIssue(issue(ValidationIssue::Severity::Error,
                                       "NON_MONOTONE_BUY",

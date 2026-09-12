@@ -10,6 +10,7 @@ TradingCenter::TradingCenter()
     : piecewiseEngine_(std::make_unique<PiecewiseClearing>()),
       quadraticEngine_(std::make_unique<QuadraticClearing>()) {}
 
+// 提交前校验：报价结构校验 + 全局可行性校验。
 ValidationReport TradingCenter::submit(const MarketInput& input) const {
     ValidationReport report = BidValidator::validate(input);
     report.merge(ConstraintChecker::checkFeasibility(input));
@@ -18,6 +19,7 @@ ValidationReport TradingCenter::submit(const MarketInput& input) const {
 
 MarketResult TradingCenter::clear(const MarketInput& input) const {
     const ValidationReport report = submit(input);
+    // 校验失败时直接返回不可行结果，避免进入出清算法。
     if (!report.ok()) {
         MarketResult result;
         result.setTimeSlot(input.timeSlot());
@@ -38,6 +40,7 @@ std::vector<TimeSlotResult> TradingCenter::runDayAheadSimulation(
     const std::vector<MarketInput>& inputs) const {
     std::vector<TimeSlotResult> results;
     results.reserve(inputs.size());
+    // 逐个时段完成：出清 -> 可选结算。
     for (const auto& input : inputs) {
         TimeSlotResult slot;
         slot.input = input;
@@ -59,6 +62,7 @@ void TradingCenter::setQuadraticEngine(std::unique_ptr<ClearingEngine> engine) {
 }
 
 ClearingEngine& TradingCenter::engineFor(const MarketInput& input) const {
+    // 根据输入中的模式字段选择对应算法。
     if (input.mode() == MarketMode::Quadratic) {
         return *quadraticEngine_;
     }

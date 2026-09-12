@@ -89,9 +89,10 @@ Pi = Pmin_i + Pmarket_i
 
 ### 5.2 双指针撮合
 
-1. 发电增量段按价格升序排序；同价时按申报顺序（机组顺序、段号）成交。
-2. 用户需求段按价格降序排序；同价时按申报顺序（用户顺序、段号）成交。
-3. 双指针 `s`（发电）、`b`（用户）同时前进：
+1. 所有机组的 `Pmin` 视为价格接受者的必发电量，先按用户报价从高到低满足需求，再从用户需求段中扣除对应电量。
+2. 发电增量段按价格升序排序；同价时按申报顺序（机组顺序、段号）成交。
+3. 用户需求段按价格降序排序；同价时按申报顺序（用户顺序、段号）成交。
+4. 双指针 `s`（发电）、`b`（用户）同时前进：
 
 ```text
 若 Cbuy >= Csell：
@@ -239,36 +240,55 @@ repeat:
 
 ### 8.1 CSV 格式
 
-`CSVReader / CSVWriter` 为通用 CSV 读写，不包含业务逻辑。业务格式约定如下：
+`CSVReader / CSVWriter` 为通用 CSV 读写，不包含业务逻辑。多主体、多时段、多段报价格式约定如下：
 
-`generators.csv`：
+`generators.csv`（发电参数，参数导入后替换当前机组列表）：
 
 ```csv
 generator_id,p_min_mw,p_max_mw,mode
 G1,20,100,piecewise
+G2,30,120,piecewise
 ```
 
-`consumers.csv`：
+`consumers.csv`（用户参数，参数导入后替换当前用户列表）：
 
 ```csv
 consumer_id,fixed_demand_mw,mode
-C1,0,piecewise
+C1,60,piecewise
+C2,40,piecewise
 ```
 
-`bids.csv`：
+`bids_generator.csv`（发电分段报价；按 `generator_id + time_slot` 分组，同组多行构成一个时段的多段报价）：
 
 ```csv
-owner_id,time_slot,segment_no,quantity_mw,price_yuan_per_mwh
-G1,0,1,20,200
-G1,0,2,30,250
+generator_id,time_slot,segment_no,quantity_mw,price_yuan_per_mwh
+G1,1,1,20,200
+G1,1,2,30,250
+G1,1,3,30,300
 ```
 
-二次模式使用 `a,b,c` 列：
+`bids_consumer.csv`（用户分段报价，结构同上）：
+
+```csv
+consumer_id,time_slot,segment_no,quantity_mw,price_yuan_per_mwh
+C1,1,1,40,270
+C1,1,2,20,250
+```
+
+约定：
+
+- `time_slot` 使用界面时段编号 `1..96`，程序内部转换为 `0..95`；
+- `quantity_mw` 表示 `Pmin` 之上的增量电量，不是累计上限；
+- `segment_no` 从 1 开始，同一主体同时段内不允许重复。
+
+二次系数 CSV 格式已预留，暂未接入界面导入：
 
 ```csv
 owner_id,time_slot,a,b,c
-G1,0,0.05,10,0
+G1,1,0.05,10,0
 ```
+
+发电阶梯报价导入或保存后，系统会按“段上边界 + 最小二乘”自动拟合出对应的二次系数并写回该机组该时段；切到二次曲线模式即可使用。`c` 固定为 0，只影响总成本展示，不影响 `Pi` 与 `λ`。
 
 ### 8.2 SQLite 表结构
 

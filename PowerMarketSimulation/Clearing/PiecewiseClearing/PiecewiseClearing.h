@@ -18,6 +18,7 @@ private:
         int segmentNo = 0;
         double quantityMw = 0.0;
         double priceYuanPerMwh = 0.0;
+        bool isPMin = false;
     };
 
     struct ConsumerRef {

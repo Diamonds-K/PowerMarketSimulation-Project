@@ -52,7 +52,7 @@ void testFreeUnitWithLowerBound() {
     assert(near(result.generatorResults()[0].outputMw, 70.0));
     assert(near(result.generatorResults()[1].outputMw, 10.0));
     assert(near(result.clearingVolumeMw(), 80.0));
-    assert(near(result.generatorResults()[0].marginalCostYuanPerMwh(),
+    assert(near(result.generatorResults()[0].marginalCostYuanPerMwh,
                 result.clearingPriceYuanPerMwh()));
 }
 
@@ -66,7 +66,7 @@ void testUpperBoundUnit() {
     assert(near(result.generatorResults()[0].outputMw, 80.0));
     assert(near(result.generatorResults()[1].outputMw, 20.0));
     assert(near(result.clearingVolumeMw(), 100.0));
-    assert(result.generatorResults()[0].marginalCostYuanPerMwh() <=
+    assert(result.generatorResults()[0].marginalCostYuanPerMwh <=
            result.clearingPriceYuanPerMwh() + 1e-6);
 }
 

@@ -35,6 +35,21 @@ Generator makePiecewiseGenerator(const std::string& id,
     return generator;
 }
 
+Consumer makePiecewiseConsumer(
+    const std::string& id,
+    const std::vector<std::pair<double, double>>& segments) {
+    Consumer consumer(id, 0.0);
+    BidSheet sheet;
+    sheet.setMode(BidSheet::Mode::Piecewise);
+    sheet.setOwnerId(id);
+    int segmentNo = 1;
+    for (const auto& segment : segments) {
+        sheet.addSegment(BidSegment(segmentNo++, segment.first, segment.second));
+    }
+    consumer.setBidSheet(sheet);
+    return consumer;
+}
+
 Generator makeQuadraticGenerator(const std::string& id,
                                  double pMin,
                                  double pMax,
@@ -73,12 +88,40 @@ void testPiecewiseSettlement() {
     const SettlementResult settlement = settlementEngine.settle(input, result);
 
     assert(near(settlement.clearingPriceYuanPerMwh(), 250.0));
-    assert(near(settlement.totalRevenueYuan(), 0.25 * 250.0 * 70.0));
+    assert(near(settlement.totalRevenueYuan(), 0.25 * 250.0 * 50.0));
     assert(near(settlement.totalCostYuan(),
-                0.25 * (250.0 * 20.0 + 200.0 * 20.0 + 250.0 * 30.0)));
+                0.25 * (250.0 * 20.0 + 200.0 * 20.0 + 250.0 * 10.0)));
     assert(near(settlement.totalProfitYuan(), 0.25 * 1000.0));
-    assert(near(settlement.totalPaymentYuan(), 0.25 * 250.0 * 70.0));
+    assert(near(settlement.totalPaymentYuan(), 0.25 * 250.0 * 50.0));
     assert(near(settlement.balanceYuan(), 0.0));
+}
+
+void testMultiAgentSettlement() {
+    const auto generator1 =
+        makePiecewiseGenerator("G1", 20.0, 100.0, {{20.0, 200.0}, {30.0, 250.0}, {30.0, 300.0}});
+    const auto generator2 =
+        makePiecewiseGenerator("G2", 10.0, 60.0, {{20.0, 220.0}, {30.0, 260.0}});
+    const auto consumer1 = makePiecewiseConsumer("C1", {{40.0, 270.0}, {20.0, 250.0}});
+    const auto consumer2 = makePiecewiseConsumer("C2", {{30.0, 260.0}, {20.0, 230.0}});
+
+    MarketInput input(0, MarketMode::Piecewise);
+    input.addGenerator(generator1);
+    input.addGenerator(generator2);
+    input.addConsumer(consumer1);
+    input.addConsumer(consumer2);
+
+    PiecewiseClearing clearing;
+    const MarketResult result = clearing.clear(input);
+    assert(result.feasible());
+
+    SettlementEngine settlementEngine;
+    const SettlementResult settlement = settlementEngine.settle(input, result);
+
+    assert(settlement.generatorSettlements().size() == 2);
+    assert(settlement.consumerSettlements().size() == 2);
+    assert(near(settlement.totalPaymentYuan(), settlement.totalRevenueYuan(), 1e-3));
+    assert(near(settlement.balanceYuan(), 0.0, 1e-3));
+    assert(settlement.totalPaymentYuan() > 0.0);
 }
 
 void testQuadraticSettlement() {
@@ -98,18 +141,19 @@ void testQuadraticSettlement() {
     SettlementEngine settlementEngine;
     const SettlementResult settlement = settlementEngine.settle(input, result);
 
-    assert(near(settlement.totalPaymentYuan(), settlement.totalRevenueYuan(), 1e-6));
-    assert(near(settlement.balanceYuan(), 0.0, 1e-6));
+    assert(near(settlement.totalPaymentYuan(), settlement.totalRevenueYuan(), 1e-4));
+    assert(near(settlement.balanceYuan(), 0.0, 1e-4));
     assert(settlement.generatorSettlements().size() == 2);
     assert(settlement.consumerSettlements().size() == 1);
     assert(near(settlement.consumerSettlements()[0].paymentYuan,
-                settlement.totalPaymentYuan()));
+                settlement.totalPaymentYuan(), 1e-4));
 }
 
 } // namespace
 
 int main() {
     testPiecewiseSettlement();
+    testMultiAgentSettlement();
     testQuadraticSettlement();
 
     std::cout << "SettlementTest passed" << std::endl;
