@@ -33,8 +33,8 @@ ValidationReport ConstraintChecker::checkFeasibility(const MarketInput& input) {
     }
 
     if (input.mode() == MarketMode::Quadratic) {
-        const double demand = input.totalFixedDemandMw();
-        // 二次模式要求固定需求在总容量范围内。
+        const double demand = input.totalEffectiveDemandMw();
+        // 二次模式要求有效需求在总容量范围内。
         if (demand + kEpsilon < sumPMin || demand > sumPMax + kEpsilon) {
             ValidationIssue item;
             item.severity = ValidationIssue::Severity::Error;

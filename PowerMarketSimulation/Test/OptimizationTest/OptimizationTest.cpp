@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "Clearing/QuadraticClearing/QuadraticClearing.h"
+#include "Model/BidSheet/BidSheet.h"
 #include "Model/Consumer/Consumer.h"
 #include "Model/Generator/Generator.h"
 #include "Model/MarketInput/MarketInput.h"
@@ -104,6 +105,64 @@ void testInfeasibleDemand() {
     assert(!result.feasible());
 }
 
+void testZeroFixedDemandFallsBackToDeclaredDemand() {
+    const auto generator = makeGenerator("G1", 0.0, 50.0, 1.0, 10.0, 0.0);
+
+    Consumer consumer("C1", 0.0);
+    BidSheet demandSheet;
+    demandSheet.setMode(BidSheet::Mode::Piecewise);
+    demandSheet.setOwnerId("C1");
+    demandSheet.addSegment(BidSegment(1, 25.0, 100.0));
+    consumer.setBidSheet(demandSheet);
+
+    MarketInput input(0, MarketMode::Quadratic);
+    input.addGenerator(generator);
+    input.addConsumer(consumer);
+
+    QuadraticClearing clearing;
+    const MarketResult result = clearing.clear(input);
+
+    assert(result.feasible());
+    assert(near(result.clearingVolumeMw(), 25.0));
+    assert(near(result.clearingPriceYuanPerMwh(), 60.0));
+    assert(near(result.consumerResults()[0].clearedDemandMw, 25.0));
+}
+
+void testFittedQuadraticMatchesDeclaredDemand() {
+    std::vector<BidSegment> segments;
+    const double prices[] = {
+        364.8, 440.1, 515.4, 590.6, 665.9,
+        741.2, 816.5, 891.8, 967.0, 1042.32
+    };
+    for (int index = 0; index < 9; ++index) {
+        segments.emplace_back(index + 1, 2.5, prices[index]);
+    }
+    segments.emplace_back(10, 4.5, prices[9]);
+
+    const BidSheet::QuadraticFit fit =
+        BidSheet::fitLadderToQuadratic(0.0, 100.0, segments);
+    const auto generator =
+        makeGenerator("G1", 0.0, 100.0, fit.a, fit.b, fit.c);
+
+    Consumer consumer("C1", 0.0);
+    BidSheet demandSheet;
+    demandSheet.setMode(BidSheet::Mode::Piecewise);
+    demandSheet.setOwnerId("C1");
+    demandSheet.addSegment(BidSegment(1, 25.0, 1576.84));
+    consumer.setBidSheet(demandSheet);
+
+    MarketInput input(0, MarketMode::Quadratic);
+    input.addGenerator(generator);
+    input.addConsumer(consumer);
+
+    QuadraticClearing clearing;
+    const MarketResult result = clearing.clear(input);
+
+    assert(result.feasible());
+    assert(near(result.clearingVolumeMw(), 25.0));
+    assert(near(result.clearingPriceYuanPerMwh(), 1042.32));
+}
+
 } // namespace
 
 int main() {
@@ -112,6 +171,8 @@ int main() {
     testAllAtLowerBound();
     testAllAtUpperBound();
     testInfeasibleDemand();
+    testZeroFixedDemandFallsBackToDeclaredDemand();
+    testFittedQuadraticMatchesDeclaredDemand();
 
     std::cout << "OptimizationTest passed" << std::endl;
     return 0;

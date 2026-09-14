@@ -355,9 +355,10 @@ Consumer ConsumerWidget::buildFromData(const ConsumerUnitData &unit,
         sheet.setMode(BidSheet::Mode::Quadratic);
     } else {
         sheet.setMode(BidSheet::Mode::Piecewise);
-        for (const BidSegment &segment : slot.segments) {
-            sheet.addSegment(segment);
-        }
+    }
+    // 二次模式采用固定需求；保留报价段，便于固定需求缺省时回退到申报总量。
+    for (const BidSegment &segment : slot.segments) {
+        sheet.addSegment(segment);
     }
     consumer.setBidSheet(sheet);
     return consumer;
@@ -408,13 +409,9 @@ bool ConsumerWidget::importParametersFromCsv(const QString &filePath,
         }
 
         // 复用默认用户，预填每个时段的阶梯需求，避免“参数导入后表格为空”。
-        // 二次需求模式不需要阶梯段，清掉即可。
         ConsumerUnitData unit = makeDefaultUnit(id);
         for (ConsumerSlotData &slot : unit.timeSlots) {
             slot.fixedDemandMw = fixedDemand;
-            if (mode == QStringLiteral("quadratic")) {
-                slot.segments.clear();
-            }
         }
         seenIds.insert(id);
         nextUnits.push_back(unit);

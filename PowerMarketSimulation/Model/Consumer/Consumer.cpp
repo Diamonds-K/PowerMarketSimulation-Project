@@ -24,6 +24,13 @@ void Consumer::setFixedDemandMw(double fixedDemandMw) {
     fixedDemandMw_ = fixedDemandMw;
 }
 
+double Consumer::effectiveDemandMw() const {
+    if (fixedDemandMw_ > 0.0) {
+        return fixedDemandMw_;
+    }
+    return bidSheet_.totalIncrementMw();
+}
+
 const BidSheet& Consumer::bidSheet() const {
     return bidSheet_;
 }

@@ -254,7 +254,7 @@ QChart *createQuadraticChart(const std::vector<Generator> &generators,
 
     double demandMw = 0.0;
     for (const Consumer &consumer : consumers) {
-        demandMw += consumer.fixedDemandMw();
+        demandMw += consumer.effectiveDemandMw();
     }
 
     if (haveUnit) {

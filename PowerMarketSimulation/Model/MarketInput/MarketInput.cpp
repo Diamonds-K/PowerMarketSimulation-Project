@@ -62,4 +62,12 @@ double MarketInput::totalDeclaredDemandMw() const {
     return total;
 }
 
+double MarketInput::totalEffectiveDemandMw() const {
+    double total = 0.0;
+    for (const auto& consumer : consumers_) {
+        total += consumer.effectiveDemandMw();
+    }
+    return total;
+}
+
 } // namespace pms

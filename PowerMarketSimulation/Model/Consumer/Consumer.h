@@ -16,6 +16,7 @@ public:
 
     double fixedDemandMw() const;
     void setFixedDemandMw(double fixedDemandMw);
+    double effectiveDemandMw() const;
 
     const BidSheet& bidSheet() const;
     BidSheet& bidSheet();

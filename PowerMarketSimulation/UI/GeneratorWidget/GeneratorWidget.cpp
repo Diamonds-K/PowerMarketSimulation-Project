@@ -74,62 +74,6 @@ bool isBidHeader(const std::vector<std::string> &row)
            row.front() == "consumer_id";
 }
 
-struct QuadraticFitResult {
-    double a = 0.05;
-    double b = 10.0;
-    double c = 0.0;
-};
-
-QuadraticFitResult fitLadderToQuadratic(double pMin,
-                                        double pMax,
-                                        const std::vector<BidSegment> &segments)
-{
-    QuadraticFitResult result;
-    if (segments.empty()) {
-        return result;
-    }
-
-    // 把每段报价看成该段上边界处的边际成本点，再对 MC=2aP+b 做最小二乘拟合。
-    std::vector<std::pair<double, double>> points;
-    double cumulativePower = 0.0;
-    for (const BidSegment &segment : segments) {
-        cumulativePower += segment.quantityMw();
-        const double power = std::min(pMin + cumulativePower, pMax);
-        points.push_back({power, segment.priceYuanPerMwh()});
-    }
-    const double lastPrice = segments.back().priceYuanPerMwh();
-    if (points.empty() || points.back().first < pMax - 1e-9) {
-        points.push_back({pMax, lastPrice});
-    }
-
-    if (points.size() < 2) {
-        points.push_back({pMin, lastPrice});
-    }
-
-    double sumX = 0.0;
-    double sumY = 0.0;
-    for (const auto &point : points) {
-        sumX += point.first;
-        sumY += point.second;
-    }
-    const double meanX = sumX / static_cast<double>(points.size());
-    const double meanY = sumY / static_cast<double>(points.size());
-
-    double numerator = 0.0;
-    double denominator = 0.0;
-    for (const auto &point : points) {
-        numerator += (point.first - meanX) * (point.second - meanY);
-        denominator += (point.first - meanX) * (point.first - meanX);
-    }
-
-    const double slope = denominator > 1e-12 ? numerator / denominator : 0.0;
-    const double minA = 1e-6;
-    result.a = std::max(slope / 2.0, minA);
-    result.b = meanY - slope * meanX;
-    result.c = 0.0;
-    return result;
-}
-
 } // namespace
 
 GeneratorWidget::GeneratorWidget(QWidget *parent)
@@ -332,8 +276,8 @@ void GeneratorWidget::saveCurrentToSlot(int unitIndex, int slotIndex)
     }
 
     if (!slot.quadraticMode && !slot.segments.empty()) {
-        const QuadraticFitResult fit =
-            fitLadderToQuadratic(unit.pMinMw, unit.pMaxMw, slot.segments);
+        const BidSheet::QuadraticFit fit = BidSheet::fitLadderToQuadratic(
+            unit.pMinMw, unit.pMaxMw, slot.segments);
         slot.quadraticA = fit.a;
         slot.quadraticB = fit.b;
         slot.quadraticC = fit.c;
@@ -715,8 +659,10 @@ bool GeneratorWidget::importBidsFromCsv(const QString &filePath,
                 GeneratorSlotData &slotData =
                     unit.timeSlots[static_cast<std::size_t>(slot)];
                 slotData.segments = entry.second;
-                const QuadraticFitResult fit =
-                    fitLadderToQuadratic(unit.pMinMw, unit.pMaxMw, slotData.segments);
+                const BidSheet::QuadraticFit fit =
+                    BidSheet::fitLadderToQuadratic(unit.pMinMw,
+                                                   unit.pMaxMw,
+                                                   slotData.segments);
                 slotData.quadraticA = fit.a;
                 slotData.quadraticB = fit.b;
                 slotData.quadraticC = fit.c;

@@ -14,7 +14,18 @@ public:
         Quadratic
     };
 
+    struct QuadraticFit {
+        double a = 0.05;
+        double b = 10.0;
+        double c = 0.0;
+    };
+
     BidSheet() = default;
+
+    static QuadraticFit fitLadderToQuadratic(
+        double pMin,
+        double pMax,
+        const std::vector<BidSegment>& segments);
 
     Mode mode() const;
     void setMode(Mode mode);

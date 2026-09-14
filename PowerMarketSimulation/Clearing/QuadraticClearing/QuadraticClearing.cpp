@@ -46,8 +46,8 @@ MarketResult QuadraticClearing::clear(const MarketInput& input) {
         units.push_back(unit);
     }
 
-    const double demand = input.totalFixedDemandMw();
-    // 二次模式要求固定总需求位于机组总容量范围内。
+    const double demand = input.totalEffectiveDemandMw();
+    // 二次模式要求有效总需求位于机组总容量范围内。
     if (demand + kTolerance < sumPMin || demand > sumPMax + kTolerance) {
         return buildFailure(input.timeSlot(),
                             "总需求 QD 超出 [ΣPmin, ΣPmax] 范围，判定不可行");
@@ -99,7 +99,7 @@ MarketResult QuadraticClearing::clear(const MarketInput& input) {
     for (const auto& consumer : input.consumers()) {
         ConsumerResult consumerResult;
         consumerResult.consumerId = consumer.id();
-        consumerResult.clearedDemandMw = consumer.fixedDemandMw();
+        consumerResult.clearedDemandMw = consumer.effectiveDemandMw();
         result.addConsumerResult(consumerResult);
     }
 
