@@ -62,3 +62,18 @@ get_filename_component(PMS_QT_RUNTIME_DIR "${Qt6_DIR}/../../../bin" ABSOLUTE)
 set_tests_properties(ClearingTest SettlementTest OptimizationTest PROPERTIES
     ENVIRONMENT_MODIFICATION
         "PATH=path_list_prepend:${PMS_COMPILER_RUNTIME_DIR};PATH=path_list_prepend:${PMS_QT_RUNTIME_DIR}")
+
+# 可选目标：把 Qt 运行库与插件复制到可执行文件旁边，使程序可脱离开发环境直接双击运行。
+if(WIN32 AND TARGET Qt6::qmake)
+    get_target_property(PMS_QMAKE_EXECUTABLE Qt6::qmake IMPORTED_LOCATION)
+    get_filename_component(PMS_QT_BIN_DIR "${PMS_QMAKE_EXECUTABLE}" DIRECTORY)
+    find_program(PMS_WINDEPLOYQT_EXECUTABLE windeployqt HINTS "${PMS_QT_BIN_DIR}")
+    if(PMS_WINDEPLOYQT_EXECUTABLE)
+        add_custom_target(deploy
+            COMMAND "${PMS_WINDEPLOYQT_EXECUTABLE}"
+                    --no-translations --no-system-d3d-compiler --no-opengl-sw
+                    "$<TARGET_FILE:PowerMarketSimulation>"
+            DEPENDS PowerMarketSimulation
+            COMMENT "Deploying Qt runtime next to PowerMarketSimulation")
+    endif()
+endif()

@@ -1,0 +1,38 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "mingw-qt6",
+      "displayName": "MinGW 13.1 + Qt 6.11.2 (Ninja, Release)",
+      "description": "本机工具链：D:/QT/Tools/mingw1310_64 + D:/QT/6.11.2/mingw_64，输出到顶层 build 目录。",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/../build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_PREFIX_PATH": "D:/QT/6.11.2/mingw_64",
+        "CMAKE_CXX_COMPILER": "D:/QT/Tools/mingw1310_64/bin/g++.exe"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "mingw-qt6",
+      "configurePreset": "mingw-qt6",
+      "jobs": 0
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "mingw-qt6",
+      "configurePreset": "mingw-qt6",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}
