@@ -47,10 +47,12 @@ MarketResult QuadraticClearing::clear(const MarketInput& input) {
     }
 
     const double demand = input.totalEffectiveDemandMw();
-    // 二次模式要求有效总需求位于机组总容量范围内。
+    // 二次模式要求本时段刚性需求位于机组总容量范围内。
     if (demand + kTolerance < sumPMin || demand > sumPMax + kTolerance) {
         return buildFailure(input.timeSlot(),
-                            "总需求 QD 超出 [ΣPmin, ΣPmax] 范围，判定不可行");
+                            "本时段需求 QD=" + formatDouble(demand) +
+                                " 超出 [ΣPmin, ΣPmax]=[" + formatDouble(sumPMin) +
+                                ", " + formatDouble(sumPMax) + "] 范围，判定不可行");
     }
 
     double lo = std::numeric_limits<double>::infinity();

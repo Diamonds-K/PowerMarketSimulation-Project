@@ -85,8 +85,11 @@ ConsumerWidget::ConsumerWidget(QWidget *parent)
 
     auto *paramGroup = new QGroupBox(QStringLiteral("用户参数"), this);
     auto *paramLayout = new QHBoxLayout(paramGroup);
-    paramLayout->addWidget(new QLabel(QStringLiteral("固定需求 QD (MW):"), paramGroup));
+    paramLayout->addWidget(new QLabel(QStringLiteral("固定需求 QD (MW，缺省值):"), paramGroup));
     fixedDemandEdit_ = new QLineEdit(QStringLiteral("100"), paramGroup);
+    fixedDemandEdit_->setToolTip(QStringLiteral(
+        "二次曲线模式的刚性需求优先取本时段申报段电量之和；"
+        "只有该时段没有任何申报报价段时，才使用这里的固定需求。"));
     paramLayout->addWidget(fixedDemandEdit_);
     paramLayout->addStretch();
     rootLayout->addWidget(paramGroup);
@@ -356,7 +359,8 @@ Consumer ConsumerWidget::buildFromData(const ConsumerUnitData &unit,
     } else {
         sheet.setMode(BidSheet::Mode::Piecewise);
     }
-    // 二次模式采用固定需求；保留报价段，便于固定需求缺省时回退到申报总量。
+    // 二次模式的刚性需求优先取本时段的申报总量（QD(slot)），
+    // 保留报价段即保留该时段的需求来源；只有该时段无申报段时才回退到固定需求。
     for (const BidSegment &segment : slot.segments) {
         sheet.addSegment(segment);
     }
