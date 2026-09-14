@@ -1,0 +1,6 @@
+consumer_id,fixed_demand_mw,mode
+C1_STEEL,320,piecewise
+C2_DATACENTER,220,piecewise
+C3_COMMERCIAL,260,piecewise
+C4_RESIDENTIAL,300,piecewise
+C5_EV,180,piecewise

@@ -1,5 +1,6 @@
 /build/
 /build_codex/
+/dist/
 /build_csv_import/
 build_csv_import/
 /.qtcreator/

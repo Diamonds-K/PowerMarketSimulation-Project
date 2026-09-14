@@ -1,0 +1,7 @@
+generator_id,p_min_mw,p_max_mw,mode
+G1_COAL1,180,600,piecewise
+G2_COAL2,150,500,piecewise
+G3_GAS1,60,300,piecewise
+G4_GAS2,40,220,piecewise
+G5_HYDRO,20,180,piecewise
+G6_RENEW,0,260,piecewise
