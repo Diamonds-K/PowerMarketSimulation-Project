@@ -8,7 +8,11 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets Sql Charts)
+if(MSVC)
+    add_compile_options(/utf-8)
+endif()
+
+find_package(Qt6 REQUIRED COMPONENTS Widgets Charts)
 
 set(PMS_CORE_SOURCES
     Model/BidSegment/BidSegment.cpp
@@ -26,13 +30,11 @@ set(PMS_CORE_SOURCES
     Settlement/SettlementEngine/SettlementEngine.cpp
     Data/CSVReader/CSVReader.cpp
     Data/CSVWriter/CSVWriter.cpp
-    Data/SQLiteManager/SQLiteManager.cpp
     TradingCenter/TradingCenter.cpp
 )
 
 add_library(pms_core STATIC ${PMS_CORE_SOURCES})
 target_include_directories(pms_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(pms_core PUBLIC Qt6::Sql)
 
 add_executable(PowerMarketSimulation
     main.cpp

@@ -67,28 +67,12 @@ void BidSheet::setOwnerId(const std::string& ownerId) {
     ownerId_ = ownerId;
 }
 
-int BidSheet::timeSlot() const {
-    return timeSlot_;
-}
-
-void BidSheet::setTimeSlot(int timeSlot) {
-    timeSlot_ = timeSlot;
-}
-
 const std::vector<BidSegment>& BidSheet::segments() const {
     return segments_;
 }
 
 void BidSheet::addSegment(const BidSegment& segment) {
     segments_.push_back(segment);
-}
-
-void BidSheet::setSegments(const std::vector<BidSegment>& segments) {
-    segments_ = segments;
-}
-
-void BidSheet::clearSegments() {
-    segments_.clear();
 }
 
 double BidSheet::quadraticA() const {

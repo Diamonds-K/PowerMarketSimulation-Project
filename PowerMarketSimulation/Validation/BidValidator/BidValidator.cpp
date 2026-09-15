@@ -9,6 +9,7 @@ namespace {
 constexpr double kEpsilon = 1e-9;
 constexpr int kMaxSegments = 10;
 
+// 将数值转换为固定精度文本，用于生成校验错误消息。
 std::string formatDouble(double value) {
     std::ostringstream oss;
     oss.precision(6);
@@ -16,13 +17,12 @@ std::string formatDouble(double value) {
     return oss.str();
 }
 
+// 创建一条结构化校验问题。
 ValidationIssue issue(ValidationIssue::Severity severity,
-                      const std::string& code,
                       const std::string& target,
                       const std::string& message) {
     ValidationIssue result;
     result.severity = severity;
-    result.code = code;
     result.target = target;
     result.message = message;
     return result;
@@ -47,10 +47,6 @@ void ValidationReport::merge(const ValidationReport& other) {
     issues_.insert(issues_.end(), other.issues_.begin(), other.issues_.end());
 }
 
-const std::vector<ValidationIssue>& ValidationReport::issues() const {
-    return issues_;
-}
-
 std::vector<std::string> ValidationReport::messages() const {
     std::vector<std::string> result;
     result.reserve(issues_.size());
@@ -66,13 +62,11 @@ ValidationReport BidValidator::validate(const MarketInput& input) {
     // 每个时段至少需要一台机组和一个用户。
     if (input.generators().empty()) {
         report.addIssue(issue(ValidationIssue::Severity::Error,
-                              "NO_GENERATOR",
                               "MarketInput",
                               "至少需要一台机组"));
     }
     if (input.consumers().empty()) {
         report.addIssue(issue(ValidationIssue::Severity::Error,
-                              "NO_CONSUMER",
                               "MarketInput",
                               "至少需要一个用户"));
     }
@@ -92,13 +86,11 @@ ValidationReport BidValidator::validateGenerator(const Generator& generator) {
 
     if (generator.pMinMw() < -kEpsilon) {
         report.addIssue(issue(ValidationIssue::Severity::Error,
-                              "PMIN_NEGATIVE",
                               target,
                               "Pmin 不能为负"));
     }
     if (generator.pMaxMw() <= generator.pMinMw()) {
         report.addIssue(issue(ValidationIssue::Severity::Error,
-                              "RANGE_INVALID",
                               target,
                               "Pmax 必须大于 Pmin"));
     }
@@ -114,7 +106,6 @@ ValidationReport BidValidator::validateConsumer(const Consumer& consumer) {
 
     if (consumer.fixedDemandMw() < -kEpsilon) {
         report.addIssue(issue(ValidationIssue::Severity::Error,
-                              "DEMAND_NEGATIVE",
                               target,
                               "固定需求不能为负"));
     }
@@ -133,7 +124,6 @@ ValidationReport BidValidator::validateBidSheet(const BidSheet& bidSheet,
     if (bidSheet.mode() == BidSheet::Mode::Quadratic) {
         if (generatorSide && bidSheet.quadraticA() <= 0.0) {
             report.addIssue(issue(ValidationIssue::Severity::Error,
-                                  "QUADRATIC_A_NONPOSITIVE",
                                   target,
                                   "二次项系数 a 必须大于 0"));
         }
@@ -143,12 +133,10 @@ ValidationReport BidValidator::validateBidSheet(const BidSheet& bidSheet,
     const auto& segments = bidSheet.segments();
     if (segments.empty()) {
         report.addIssue(issue(ValidationIssue::Severity::Error,
-                              "NO_SEGMENT",
                               target,
                               "分段报价至少需要一段"));
     } else if (static_cast<int>(segments.size()) > kMaxSegments) {
         report.addIssue(issue(ValidationIssue::Severity::Error,
-                              "TOO_MANY_SEGMENTS",
                               target,
                               "分段报价不能超过 10 段"));
     }
@@ -156,7 +144,6 @@ ValidationReport BidValidator::validateBidSheet(const BidSheet& bidSheet,
     for (const auto& segment : segments) {
         if (segment.quantityMw() <= kEpsilon) {
             report.addIssue(issue(ValidationIssue::Severity::Error,
-                                  "NON_POSITIVE_QUANTITY",
                                   target,
                                   "段电量必须大于 0"));
         }
@@ -169,7 +156,6 @@ ValidationReport BidValidator::validateBidSheet(const BidSheet& bidSheet,
             // 发电侧价格必须单调不减。
             if (current + kEpsilon < previous) {
                 report.addIssue(issue(ValidationIssue::Severity::Error,
-                                      "NON_MONOTONE_SELL",
                                       target,
                                       "发电段价格必须单调不减"));
                 break;
@@ -178,7 +164,6 @@ ValidationReport BidValidator::validateBidSheet(const BidSheet& bidSheet,
             // 用户侧价格必须单调不增。
             if (current - kEpsilon > previous) {
                 report.addIssue(issue(ValidationIssue::Severity::Error,
-                                      "NON_MONOTONE_BUY",
                                       target,
                                       "用户段价格必须单调不增"));
                 break;
@@ -190,7 +175,6 @@ ValidationReport BidValidator::validateBidSheet(const BidSheet& bidSheet,
         const double totalIncrement = bidSheet.totalIncrementMw();
         if (totalIncrement > availableCapacityMw + kEpsilon) {
             report.addIssue(issue(ValidationIssue::Severity::Error,
-                                  "CAPACITY_EXCEEDED",
                                   target,
                                   "累计增量电量 " + formatDouble(totalIncrement) +
                                       " 超过 Pmax-Pmin=" + formatDouble(availableCapacityMw)));

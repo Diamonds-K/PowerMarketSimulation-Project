@@ -8,6 +8,7 @@ namespace {
 
 constexpr double kEpsilon = 1e-9;
 
+// 将数值转换为固定精度文本，用于拼接不可行原因。
 std::string formatDouble(double value) {
     std::ostringstream oss;
     oss.precision(6);
@@ -38,7 +39,6 @@ ValidationReport ConstraintChecker::checkFeasibility(const MarketInput& input) {
         if (demand + kEpsilon < sumPMin || demand > sumPMax + kEpsilon) {
             ValidationIssue item;
             item.severity = ValidationIssue::Severity::Error;
-            item.code = "DEMAND_OUT_OF_RANGE";
             item.target = "MarketInput";
             item.message = "总需求 QD=" + formatDouble(demand) +
                            " 必须位于 [ΣPmin, ΣPmax]=[" +
@@ -54,7 +54,6 @@ ValidationReport ConstraintChecker::checkFeasibility(const MarketInput& input) {
     if (declaredDemand + kEpsilon < sumPMin) {
         ValidationIssue item;
         item.severity = ValidationIssue::Severity::Error;
-        item.code = "DEMAND_BELOW_PMIN";
         item.target = "MarketInput";
         item.message = "用户总申报需求=" + formatDouble(declaredDemand) +
                        " 低于 ΣPmin=" + formatDouble(sumPMin);

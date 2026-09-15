@@ -139,7 +139,6 @@ void testDeclaredDemandVariesByTimeSlot() {
         BidSheet sheet;
         sheet.setMode(BidSheet::Mode::Quadratic);
         sheet.setOwnerId("C1");
-        sheet.setTimeSlot(timeSlot);
         sheet.addSegment(BidSegment(1, declaredMw, 800.0));
         consumer.setBidSheet(sheet);
 

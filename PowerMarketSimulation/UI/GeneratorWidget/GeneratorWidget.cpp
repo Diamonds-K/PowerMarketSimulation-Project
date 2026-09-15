@@ -29,6 +29,7 @@ namespace pms {
 
 namespace {
 
+// 构造一台默认发电机组及其初始分段报价。
 GeneratorUnitData makeDefaultUnit(const QString &id)
 {
     GeneratorUnitData unit;
@@ -50,6 +51,7 @@ GeneratorUnitData makeDefaultUnit(const QString &id)
     return unit;
 }
 
+// 解析非负浮点数，格式错误或数值为负时返回 false。
 bool parsePositiveDouble(const QString &text, double &value)
 {
     bool ok = false;
@@ -57,6 +59,7 @@ bool parsePositiveDouble(const QString &text, double &value)
     return ok && value >= 0.0;
 }
 
+// 判断 CSV 行是否为发电或用户参数表头。
 bool isParamHeader(const std::vector<std::string> &row)
 {
     if (row.empty()) {
@@ -65,6 +68,7 @@ bool isParamHeader(const std::vector<std::string> &row)
     return row.front() == "generator_id" || row.front() == "consumer_id";
 }
 
+// 判断 CSV 行是否为报价明细表头。
 bool isBidHeader(const std::vector<std::string> &row)
 {
     if (row.empty()) {
@@ -416,23 +420,6 @@ bool GeneratorWidget::removeCurrentUnit()
     }
     loadUnit(currentUnitIndex_);
     return true;
-}
-
-int GeneratorWidget::unitCount() const
-{
-    return static_cast<int>(units_.size());
-}
-
-Generator GeneratorWidget::buildGenerator(bool quadratic) const
-{
-    return buildFromData(units_[static_cast<std::size_t>(currentUnitIndex_)],
-                         currentSlotIndex_,
-                         quadratic);
-}
-
-std::vector<Generator> GeneratorWidget::buildGenerators(bool quadratic) const
-{
-    return buildGeneratorsForSlot(currentSlotIndex_, quadratic);
 }
 
 std::vector<Generator> GeneratorWidget::buildGeneratorsForSlot(

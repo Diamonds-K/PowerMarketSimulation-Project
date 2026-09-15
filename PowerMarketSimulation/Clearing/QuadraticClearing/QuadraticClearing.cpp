@@ -9,6 +9,7 @@ namespace pms {
 
 namespace {
 
+// 将数值转换为固定精度文本，用于出清结果说明。
 std::string formatDouble(double value) {
     std::ostringstream oss;
     oss.precision(6);
@@ -107,10 +108,6 @@ MarketResult QuadraticClearing::clear(const MarketInput& input) {
 
     result.setMessage("二次曲线模式已按 KKT/λ 二分收敛，Cclear=λ=" + formatDouble(lambda));
     return result;
-}
-
-std::string QuadraticClearing::modeName() const {
-    return "Quadratic";
 }
 
 double QuadraticClearing::outputForLambda(const Unit& unit, double lambda) {

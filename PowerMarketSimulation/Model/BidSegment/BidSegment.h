@@ -4,17 +4,17 @@ namespace pms {
 
 class BidSegment {
 public:
-    BidSegment() = default;
+    // 创建一个报价段，记录段号、电量和单价。
     BidSegment(int segmentNo, double quantityMw, double priceYuanPerMwh);
 
+    // 返回段号。
     int segmentNo() const;
-    void setSegmentNo(int segmentNo);
 
+    // 返回该段电量，单位为 MW。
     double quantityMw() const;
-    void setQuantityMw(double quantityMw);
 
+    // 返回该段报价，单位为元/MWh。
     double priceYuanPerMwh() const;
-    void setPriceYuanPerMwh(double priceYuanPerMwh);
 
 private:
     int segmentNo_ = 0;

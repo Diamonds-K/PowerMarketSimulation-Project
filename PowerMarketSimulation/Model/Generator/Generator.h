@@ -8,20 +8,22 @@ namespace pms {
 
 class Generator {
 public:
-    Generator() = default;
+    // 创建发电机组，记录标识、最小出力和最大出力。
     Generator(std::string id, double pMinMw, double pMaxMw);
 
+    // 返回机组标识。
     const std::string& id() const;
-    void setId(const std::string& id);
 
+    // 返回最小稳定出力，单位为 MW。
     double pMinMw() const;
-    void setPMinMw(double pMinMw);
 
+    // 返回最大出力，单位为 MW。
     double pMaxMw() const;
-    void setPMaxMw(double pMaxMw);
 
+    // 返回只读报价单。
     const BidSheet& bidSheet() const;
-    BidSheet& bidSheet();
+
+    // 替换机组报价单。
     void setBidSheet(const BidSheet& bidSheet);
 
 private:

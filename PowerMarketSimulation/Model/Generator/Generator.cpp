@@ -13,31 +13,15 @@ const std::string& Generator::id() const {
     return id_;
 }
 
-void Generator::setId(const std::string& id) {
-    id_ = id;
-}
-
 double Generator::pMinMw() const {
     return pMinMw_;
-}
-
-void Generator::setPMinMw(double pMinMw) {
-    pMinMw_ = pMinMw;
 }
 
 double Generator::pMaxMw() const {
     return pMaxMw_;
 }
 
-void Generator::setPMaxMw(double pMaxMw) {
-    pMaxMw_ = pMaxMw;
-}
-
 const BidSheet& Generator::bidSheet() const {
-    return bidSheet_;
-}
-
-BidSheet& Generator::bidSheet() {
     return bidSheet_;
 }
 

@@ -7,6 +7,7 @@
 
 namespace pms {
 
+// 市场出清模式：分段阶梯报价或二次成本曲线。
 enum class MarketMode {
     Piecewise,
     Quadratic
@@ -14,25 +15,31 @@ enum class MarketMode {
 
 class MarketInput {
 public:
-    MarketInput() = default;
+    // 创建一个时段的市场输入。
     MarketInput(int timeSlot, MarketMode mode);
 
+    // 返回时段索引，内部编号范围为 0..95。
     int timeSlot() const;
-    void setTimeSlot(int timeSlot);
 
+    // 返回当前市场出清模式。
     MarketMode mode() const;
-    void setMode(MarketMode mode);
 
+    // 返回当前时段全部发电机组。
     const std::vector<Generator>& generators() const;
-    std::vector<Generator>& generators();
+
+    // 向市场输入添加一台发电机组。
     void addGenerator(const Generator& generator);
 
+    // 返回当前时段全部用户。
     const std::vector<Consumer>& consumers() const;
-    std::vector<Consumer>& consumers();
+
+    // 向市场输入添加一个用户。
     void addConsumer(const Consumer& consumer);
 
-    double totalFixedDemandMw() const;
+    // 返回用户申报段电量总和。
     double totalDeclaredDemandMw() const;
+
+    // 返回应用固定需求回退规则后的有效总需求。
     double totalEffectiveDemandMw() const;
 
 private:

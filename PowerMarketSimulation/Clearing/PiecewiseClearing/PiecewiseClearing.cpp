@@ -10,6 +10,7 @@ namespace {
 
 constexpr double kEpsilon = 1e-9;
 
+// 将数值转换为固定精度文本，用于出清结果说明。
 std::string formatDouble(double value) {
     std::ostringstream oss;
     oss.precision(6);
@@ -189,10 +190,6 @@ MarketResult PiecewiseClearing::clear(const MarketInput& input) {
     }
     result.setMessage(message);
     return result;
-}
-
-std::string PiecewiseClearing::modeName() const {
-    return "Piecewise";
 }
 
 MarketResult PiecewiseClearing::buildFailure(int timeSlot, const std::string& message) {

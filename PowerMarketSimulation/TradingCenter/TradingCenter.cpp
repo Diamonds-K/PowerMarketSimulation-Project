@@ -1,7 +1,5 @@
 #include "TradingCenter/TradingCenter.h"
 
-#include <utility>
-
 #include "Validation/ConstraintChecker/ConstraintChecker.h"
 
 namespace pms {
@@ -43,7 +41,6 @@ std::vector<TimeSlotResult> TradingCenter::runDayAheadSimulation(
     // 逐个时段完成：出清 -> 可选结算。
     for (const auto& input : inputs) {
         TimeSlotResult slot;
-        slot.input = input;
         slot.market = clear(input);
         if (slot.market.feasible()) {
             slot.settlement = settle(input, slot.market);
@@ -51,14 +48,6 @@ std::vector<TimeSlotResult> TradingCenter::runDayAheadSimulation(
         results.push_back(slot);
     }
     return results;
-}
-
-void TradingCenter::setPiecewiseEngine(std::unique_ptr<ClearingEngine> engine) {
-    piecewiseEngine_ = std::move(engine);
-}
-
-void TradingCenter::setQuadraticEngine(std::unique_ptr<ClearingEngine> engine) {
-    quadraticEngine_ = std::move(engine);
 }
 
 ClearingEngine& TradingCenter::engineFor(const MarketInput& input) const {

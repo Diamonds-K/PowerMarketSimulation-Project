@@ -5,16 +5,13 @@ namespace pms {
 SettlementResult SettlementEngine::settle(const MarketInput& input,
                                           const MarketResult& result) const {
     SettlementResult settlement;
-    settlement.setTimeSlot(result.timeSlot());
     const double price = result.clearingPriceYuanPerMwh();
-    settlement.setClearingPriceYuanPerMwh(price);
 
     // 统一结算价格：所有成交电量都按同一个出清价结算。
     const auto& generatorResults = result.generatorResults();
     const auto& consumerResults = result.consumerResults();
 
     double totalRevenue = 0.0;
-    double totalCost = 0.0;
     double totalPayment = 0.0;
 
     // 计算每台机组的收益、成本和利润。
@@ -55,7 +52,6 @@ SettlementResult SettlementEngine::settle(const MarketInput& input,
         settlement.addGeneratorSettlement(settlementItem);
 
         totalRevenue += revenueYuan;
-        totalCost += costYuan;
     }
 
     // 计算每个用户的支付金额。
@@ -75,8 +71,6 @@ SettlementResult SettlementEngine::settle(const MarketInput& input,
     }
 
     settlement.setTotalRevenueYuan(totalRevenue);
-    settlement.setTotalCostYuan(totalCost);
-    settlement.setTotalProfitYuan(totalRevenue - totalCost);
     settlement.setTotalPaymentYuan(totalPayment);
     return settlement;
 }

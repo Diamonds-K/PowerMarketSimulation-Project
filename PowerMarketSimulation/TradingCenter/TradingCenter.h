@@ -1,7 +1,6 @@
 #pragma once
 
 #include <memory>
-#include <string>
 #include <vector>
 
 #include "Clearing/ClearingEngine/ClearingEngine.h"
@@ -15,15 +14,15 @@
 
 namespace pms {
 
-// 一个时段的完整仿真结果：原始输入、出清结果、结算结果。
+// 一个时段的完整仿真结果：出清结果与结算结果。
 struct TimeSlotResult {
-    MarketInput input;
     MarketResult market;
     SettlementResult settlement;
 };
 
 class TradingCenter {
 public:
+    // 创建交易中心，并初始化分段报价与二次曲线两套出清引擎。
     TradingCenter();
 
     // 校验单个时段的申报数据。
@@ -39,10 +38,8 @@ public:
     std::vector<TimeSlotResult> runDayAheadSimulation(
         const std::vector<MarketInput>& inputs) const;
 
-    void setPiecewiseEngine(std::unique_ptr<ClearingEngine> engine);
-    void setQuadraticEngine(std::unique_ptr<ClearingEngine> engine);
-
 private:
+    // 根据市场模式返回对应的出清引擎。
     ClearingEngine& engineFor(const MarketInput& input) const;
 
     std::unique_ptr<ClearingEngine> piecewiseEngine_;

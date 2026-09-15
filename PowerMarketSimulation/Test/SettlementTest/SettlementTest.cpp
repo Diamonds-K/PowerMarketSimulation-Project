@@ -87,11 +87,12 @@ void testPiecewiseSettlement() {
     SettlementEngine settlementEngine;
     const SettlementResult settlement = settlementEngine.settle(input, result);
 
-    assert(near(settlement.clearingPriceYuanPerMwh(), 250.0));
+    assert(near(result.clearingPriceYuanPerMwh(), 250.0));
     assert(near(settlement.totalRevenueYuan(), 0.25 * 250.0 * 50.0));
-    assert(near(settlement.totalCostYuan(),
+    assert(settlement.generatorSettlements().size() == 1);
+    assert(near(settlement.generatorSettlements()[0].costYuan,
                 0.25 * (250.0 * 20.0 + 200.0 * 20.0 + 250.0 * 10.0)));
-    assert(near(settlement.totalProfitYuan(), 0.25 * 1000.0));
+    assert(near(settlement.generatorSettlements()[0].profitYuan, 0.25 * 1000.0));
     assert(near(settlement.totalPaymentYuan(), 0.25 * 250.0 * 50.0));
     assert(near(settlement.balanceYuan(), 0.0));
 }

@@ -12,16 +12,8 @@ const std::string& Consumer::id() const {
     return id_;
 }
 
-void Consumer::setId(const std::string& id) {
-    id_ = id;
-}
-
 double Consumer::fixedDemandMw() const {
     return fixedDemandMw_;
-}
-
-void Consumer::setFixedDemandMw(double fixedDemandMw) {
-    fixedDemandMw_ = fixedDemandMw;
 }
 
 double Consumer::effectiveDemandMw() const {
@@ -35,10 +27,6 @@ double Consumer::effectiveDemandMw() const {
 }
 
 const BidSheet& Consumer::bidSheet() const {
-    return bidSheet_;
-}
-
-BidSheet& Consumer::bidSheet() {
     return bidSheet_;
 }
 

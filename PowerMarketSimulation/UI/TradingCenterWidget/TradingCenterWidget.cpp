@@ -40,11 +40,13 @@ namespace pms {
 
 namespace {
 
+// 按指定小数位格式化界面展示数值。
 QString formatNumber(double value, int precision = 2)
 {
     return QString::number(value, 'f', precision);
 }
 
+// 根据 CSV 导入结果统一显示成功或部分导入提示。
 void showImportOutcome(QWidget *parent,
                        const QString &successTitle,
                        const QString &successMessage,
@@ -57,6 +59,7 @@ void showImportOutcome(QWidget *parent,
     }
 }
 
+// 将一组报价段追加为阶梯型折线，可选按价格升序或降序排列。
 void appendStepCurve(QLineSeries *series,
                      std::vector<BidSegment> segments,
                      bool sortAscendingByPrice,
@@ -82,6 +85,7 @@ void appendStepCurve(QLineSeries *series,
     }
 }
 
+// 计算报价段总电量。
 double totalQuantityMw(const std::vector<BidSegment> &segments)
 {
     return std::accumulate(segments.begin(), segments.end(), 0.0,
@@ -90,6 +94,7 @@ double totalQuantityMw(const std::vector<BidSegment> &segments)
                            });
 }
 
+// 返回报价段中的最高价格。
 double maxPriceYuanPerMwh(const std::vector<BidSegment> &segments)
 {
     if (segments.empty()) {
@@ -102,21 +107,7 @@ double maxPriceYuanPerMwh(const std::vector<BidSegment> &segments)
     return it->priceYuanPerMwh();
 }
 
-std::vector<BidSegment> collectSegments(const std::vector<Generator> &generators,
-                                        const std::vector<Consumer> &consumers)
-{
-    std::vector<BidSegment> segments;
-    for (const Generator &generator : generators) {
-        const auto &source = generator.bidSheet().segments();
-        segments.insert(segments.end(), source.begin(), source.end());
-    }
-    for (const Consumer &consumer : consumers) {
-        const auto &source = consumer.bidSheet().segments();
-        segments.insert(segments.end(), source.begin(), source.end());
-    }
-    return segments;
-}
-
+// 汇总全部发电机组的可供给报价段。
 std::vector<BidSegment> collectSupplySegments(const std::vector<Generator> &generators)
 {
     std::vector<BidSegment> segments;
@@ -127,6 +118,7 @@ std::vector<BidSegment> collectSupplySegments(const std::vector<Generator> &gene
     return segments;
 }
 
+// 汇总全部用户的需求报价段。
 std::vector<BidSegment> collectDemandSegments(const std::vector<Consumer> &consumers)
 {
     std::vector<BidSegment> segments;
@@ -137,6 +129,7 @@ std::vector<BidSegment> collectDemandSegments(const std::vector<Consumer> &consu
     return segments;
 }
 
+// 创建分段报价模式的供需曲线图。
 QChart *createPiecewiseChart(const std::vector<Generator> &generators,
                              const std::vector<Consumer> &consumers)
 {
@@ -196,6 +189,7 @@ QChart *createPiecewiseChart(const std::vector<Generator> &generators,
     return chart;
 }
 
+// 创建二次曲线模式的边际成本、聚合供给与出清价格图。
 QChart *createQuadraticChart(const std::vector<Generator> &generators,
                              const std::vector<Consumer> &consumers,
                              const MarketResult &result)
@@ -621,11 +615,9 @@ void TradingCenterWidget::runClearForSlot(int slotIndex)
 
     MarketInput input(slotIndex, mode);
     for (Generator generator : generators) {
-        generator.bidSheet().setTimeSlot(slotIndex);
         input.addGenerator(generator);
     }
     for (Consumer consumer : consumers) {
-        consumer.bidSheet().setTimeSlot(slotIndex);
         input.addConsumer(consumer);
     }
 
@@ -644,7 +636,6 @@ void TradingCenterWidget::runClearForSlot(int slotIndex)
         lastResults_.resize(96);
     }
     TimeSlotResult &slotResult = lastResults_[static_cast<std::size_t>(slotIndex)];
-    slotResult.input = input;
     slotResult.market = result;
     if (result.feasible()) {
         slotResult.settlement = tradingCenter_.settle(input, result);
@@ -679,11 +670,9 @@ void TradingCenterWidget::runBatchClearAllPeriods()
 
         MarketInput input(slot, mode);
         for (Generator generator : generators) {
-            generator.bidSheet().setTimeSlot(slot);
             input.addGenerator(generator);
         }
         for (Consumer consumer : consumers) {
-            consumer.bidSheet().setTimeSlot(slot);
             input.addConsumer(consumer);
         }
         inputs.push_back(input);

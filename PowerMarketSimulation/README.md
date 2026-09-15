@@ -9,11 +9,11 @@
 - 96 个 15 分钟时段日前市场仿真
 - 分段报价双指针撮合（模式 1）
 - 二次曲线报价 KKT/λ 二分求解（模式 2）
-- CSV 导入导出与 SQLite 持久化
+- CSV 导入导出
 
 ## 构建
 
-需要 CMake 3.16+、C++17、Qt 6（Widgets + Sql）。
+需要 CMake 3.16+、C++17、Qt 6（Widgets + Charts）。
 
 ```bash
 cmake -S . -B build

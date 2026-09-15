@@ -27,6 +27,7 @@ namespace pms {
 
 namespace {
 
+// 构造一个默认用户及其初始需求报价。
 ConsumerUnitData makeDefaultUnit(const QString &id)
 {
     ConsumerUnitData unit;
@@ -41,6 +42,7 @@ ConsumerUnitData makeDefaultUnit(const QString &id)
     return unit;
 }
 
+// 判断 CSV 行是否为发电或用户参数表头。
 bool isParamHeader(const std::vector<std::string> &row)
 {
     if (row.empty()) {
@@ -49,6 +51,7 @@ bool isParamHeader(const std::vector<std::string> &row)
     return row.front() == "consumer_id" || row.front() == "generator_id";
 }
 
+// 判断 CSV 行是否为报价明细表头。
 bool isBidHeader(const std::vector<std::string> &row)
 {
     if (row.empty()) {
@@ -314,23 +317,6 @@ bool ConsumerWidget::removeCurrentUnit()
     }
     loadUnit(currentUnitIndex_);
     return true;
-}
-
-int ConsumerWidget::unitCount() const
-{
-    return static_cast<int>(units_.size());
-}
-
-Consumer ConsumerWidget::buildConsumer(bool quadratic) const
-{
-    return buildFromData(units_[static_cast<std::size_t>(currentUnitIndex_)],
-                         currentSlotIndex_,
-                         quadratic);
-}
-
-std::vector<Consumer> ConsumerWidget::buildConsumers(bool quadratic) const
-{
-    return buildConsumersForSlot(currentSlotIndex_, quadratic);
 }
 
 std::vector<Consumer> ConsumerWidget::buildConsumersForSlot(

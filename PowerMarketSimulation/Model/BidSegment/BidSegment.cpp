@@ -11,24 +11,12 @@ int BidSegment::segmentNo() const {
     return segmentNo_;
 }
 
-void BidSegment::setSegmentNo(int segmentNo) {
-    segmentNo_ = segmentNo;
-}
-
 double BidSegment::quantityMw() const {
     return quantityMw_;
 }
 
-void BidSegment::setQuantityMw(double quantityMw) {
-    quantityMw_ = quantityMw;
-}
-
 double BidSegment::priceYuanPerMwh() const {
     return priceYuanPerMwh_;
-}
-
-void BidSegment::setPriceYuanPerMwh(double priceYuanPerMwh) {
-    priceYuanPerMwh_ = priceYuanPerMwh;
 }
 
 } // namespace pms
