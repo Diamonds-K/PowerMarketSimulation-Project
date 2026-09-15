@@ -1,5 +1,6 @@
 #include "Data/CSVReader/CSVReader.h"
 
+#include <filesystem>
 #include <fstream>
 
 namespace pms {
@@ -7,7 +8,9 @@ namespace pms {
 bool CSVReader::read(const std::string& path,
                      std::vector<Row>& rows,
                      std::string& errorMessage) {
-    std::ifstream file(path);
+    // 用 std::filesystem::u8path 把 UTF-8 路径转换为平台原生宽路径，
+    // 避免中文目录在 Windows(GBK 代码页) 下用窄字符路径打不开文件。
+    std::ifstream file(std::filesystem::u8path(path));
     if (!file.is_open()) {
         errorMessage = "无法打开文件: " + path;
         return false;
@@ -15,9 +18,24 @@ bool CSVReader::read(const std::string& path,
 
     rows.clear();
     std::string line;
+    bool isFirstLine = true;
     while (std::getline(file, line)) {
         if (!line.empty() && line.back() == '\r') {
             line.pop_back();
+        }
+        if (isFirstLine) {
+            isFirstLine = false;
+            // 去掉 UTF-8 BOM，兼容 Excel 导出的 CSV。
+            if (line.size() >= 3 &&
+                static_cast<unsigned char>(line[0]) == 0xEF &&
+                static_cast<unsigned char>(line[1]) == 0xBB &&
+                static_cast<unsigned char>(line[2]) == 0xBF) {
+                line.erase(0, 3);
+            }
+        }
+        // 跳过空白行，文件末尾多余的空行不能再被当成一行数据。
+        if (line.empty()) {
+            continue;
         }
         rows.push_back(splitLine(line));
     }

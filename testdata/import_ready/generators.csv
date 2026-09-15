@@ -1,0 +1,2 @@
+generator_id,p_min_mw,p_max_mw,mode
+G1,0,100,piecewise

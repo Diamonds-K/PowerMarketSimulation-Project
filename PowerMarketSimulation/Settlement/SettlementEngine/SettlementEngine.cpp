@@ -9,6 +9,7 @@ SettlementResult SettlementEngine::settle(const MarketInput& input,
     const double price = result.clearingPriceYuanPerMwh();
     settlement.setClearingPriceYuanPerMwh(price);
 
+    // 统一结算价格：所有成交电量都按同一个出清价结算。
     const auto& generatorResults = result.generatorResults();
     const auto& consumerResults = result.consumerResults();
 
@@ -16,6 +17,7 @@ SettlementResult SettlementEngine::settle(const MarketInput& input,
     double totalCost = 0.0;
     double totalPayment = 0.0;
 
+    // 计算每台机组的收益、成本和利润。
     for (size_t i = 0; i < input.generators().size(); ++i) {
         const Generator& generator = input.generators()[i];
         const double outputMw =
@@ -25,11 +27,13 @@ SettlementResult SettlementEngine::settle(const MarketInput& input,
 
         double costYuan = 0.0;
         if (generator.bidSheet().mode() == BidSheet::Mode::Quadratic) {
+            // 二次模式用 aP^2 + bP + c 计算成本。
             const double a = generator.bidSheet().quadraticA();
             const double b = generator.bidSheet().quadraticB();
             const double c = generator.bidSheet().quadraticC();
             costYuan = (a * outputMw * outputMw + b * outputMw + c) * kSlotDurationHours;
         } else {
+            // 分段模式成本 = Pmin 按出清价结算 + 各成交段按段价结算。
             const double baseCostYuan =
                 price * generator.pMinMw() * kSlotDurationHours;
             double incrementCostYuan = 0.0;
@@ -54,6 +58,7 @@ SettlementResult SettlementEngine::settle(const MarketInput& input,
         totalCost += costYuan;
     }
 
+    // 计算每个用户的支付金额。
     for (size_t i = 0; i < input.consumers().size(); ++i) {
         const Consumer& consumer = input.consumers()[i];
         const double clearedMw =

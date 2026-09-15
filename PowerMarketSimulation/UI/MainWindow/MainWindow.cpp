@@ -23,6 +23,20 @@ MainWindow::MainWindow(QWidget* parent)
 
     setCentralWidget(tabs_);
     resize(1100, 720);
+
+    connect(generatorWidget_, &GeneratorWidget::timeSlotChanged,
+            this, &MainWindow::syncTimeSlot);
+    connect(consumerWidget_, &ConsumerWidget::timeSlotChanged,
+            this, &MainWindow::syncTimeSlot);
+    connect(tradingCenterWidget_, &TradingCenterWidget::timeSlotChanged,
+            this, &MainWindow::syncTimeSlot);
+}
+
+void MainWindow::syncTimeSlot(int displaySlot)
+{
+    generatorWidget_->setTimeSlot(displaySlot);
+    consumerWidget_->setTimeSlot(displaySlot);
+    tradingCenterWidget_->setTimeSlot(displaySlot);
 }
 
 } // namespace pms

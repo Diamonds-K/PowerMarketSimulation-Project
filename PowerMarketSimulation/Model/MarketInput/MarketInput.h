@@ -33,6 +33,7 @@ public:
 
     double totalFixedDemandMw() const;
     double totalDeclaredDemandMw() const;
+    double totalEffectiveDemandMw() const;
 
 private:
     int timeSlot_ = -1;

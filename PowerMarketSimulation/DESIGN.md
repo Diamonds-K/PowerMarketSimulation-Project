@@ -13,7 +13,7 @@
 - 日前市场共 96 个时段，时段编号 `0..95`，每个时段 15 分钟；
 - 单市场、无网络约束、统一出清价；
 - 所有机组已在线运行；
-- 二次曲线模式下需求刚性（固定 `QD`）。
+- 二次曲线模式下需求刚性：每个时段的刚性需求 `QD(slot)` 由用户在**该时段**的申报需求量确定，不与全天恒定值绑定。
 
 ## 2. 统一假设
 
@@ -22,7 +22,15 @@
 3. 用户分段需求按价格单调不增排列。
 4. 二次曲线总报价成本为 `Bi(Pi)=ai*Pi^2+bi*Pi+ci`，`ai>0` 保证凸性。
 5. `ci` 只影响总成本，不影响出力分配和 `λ`。
-6. 分段模式用户申报总需求低于 `ΣPmin` 时不可行；二次模式 `QD` 必须在 `[ΣPmin, ΣPmax]` 内。
+6. 分段模式用户申报总需求低于 `ΣPmin` 时不可行；二次模式本时段需求 `QD(slot)` 必须在 `[ΣPmin, ΣPmax]` 内。
+7. 二次模式刚性需求按“**逐时段申报优先**”取值：
+
+```text
+QD(slot) = Σ 该时段全部用户申报段电量     // 该时段存在用户申报段
+QD(slot) = Σ 用户参数中的 fixedDemand      // 该时段用户没有任何申报段
+```
+
+   即：某用户在某时段申报了报价段，就以该时段申报段电量之和作为其需求；只有该时段完全没有申报段时，才回退到参数里的固定需求。因此不同时段可以有不同的 `QD`，同一时段内的需求仍然刚性。
 
 ## 3. 量纲与结算单位
 
@@ -43,7 +51,7 @@
 | `BidSegment` | `segmentNo`、`quantityMw`、`priceYuanPerMwh` | 一段电量与价格 |
 | `BidSheet` | `ownerId`、`timeSlot`、`mode`、`segments`、`a/b/c` | 分段或二次报价 |
 | `Generator` | `id`、`pMinMw`、`pMaxMw`、`bidSheet` | 发电机组 |
-| `Consumer` | `id`、`fixedDemandMw`、`bidSheet` | 用户 |
+| `Consumer` | `id`、`fixedDemandMw`、`bidSheet` | 用户；`bidSheet` 的段申报同时是该时段的刚性需求来源，`fixedDemandMw` 为该时段无申报段时的回退值 |
 | `MarketInput` | `timeSlot`、`mode`、`generators`、`consumers` | 单时段市场输入 |
 | `MarketResult` | `clearingPrice`、`clearingVolume`、`feasible`、`shortage`、机组/用户结果 | 单时段出清结果 |
 | `SettlementResult` | 发电收益/成本/利润、用户支付、总量平衡 | 单时段结算结果 |
@@ -72,6 +80,7 @@ C1 >= C2 >= ... >= Cn
 ```text
 ai > 0
 fixedDemand >= 0
+QD(slot) = Σ 该时段用户申报段电量（该时段无申报段时取 fixedDemand）
 ```
 
 ## 5. 模式 1：分段报价出清
@@ -89,9 +98,10 @@ Pi = Pmin_i + Pmarket_i
 
 ### 5.2 双指针撮合
 
-1. 发电增量段按价格升序排序；同价时按申报顺序（机组顺序、段号）成交。
-2. 用户需求段按价格降序排序；同价时按申报顺序（用户顺序、段号）成交。
-3. 双指针 `s`（发电）、`b`（用户）同时前进：
+1. 所有机组的 `Pmin` 视为价格接受者的必发电量，先按用户报价从高到低满足需求，再从用户需求段中扣除对应电量。
+2. 发电增量段按价格升序排序；同价时按申报顺序（机组顺序、段号）成交。
+3. 用户需求段按价格降序排序；同价时按申报顺序（用户顺序、段号）成交。
+4. 双指针 `s`（发电）、`b`（用户）同时前进：
 
 ```text
 若 Cbuy >= Csell：
@@ -168,7 +178,7 @@ s.t.
     ai > 0
 ```
 
-`QD` 为二次模式固定总需求。若 `QD` 在 `[ΣPmin, ΣPmax]` 之外，直接判定不可行。
+`QD(slot)` 为二次模式**本时段**的刚性总需求，取值规则见第 2 节第 7 条：该时段有用户申报段时取申报段电量之和，无申报段时回退到固定需求。不同时段可以不同，同一时段内刚性。若本时段 `QD(slot)` 在 `[ΣPmin, ΣPmax]` 之外，直接判定该时段不可行。
 
 ### 6.2 KKT 条件
 
@@ -239,36 +249,57 @@ repeat:
 
 ### 8.1 CSV 格式
 
-`CSVReader / CSVWriter` 为通用 CSV 读写，不包含业务逻辑。业务格式约定如下：
+`CSVReader / CSVWriter` 为通用 CSV 读写，不包含业务逻辑。多主体、多时段、多段报价格式约定如下：
 
-`generators.csv`：
+`generators.csv`（发电参数，参数导入后替换当前机组列表）：
 
 ```csv
 generator_id,p_min_mw,p_max_mw,mode
 G1,20,100,piecewise
+G2,30,120,piecewise
 ```
 
-`consumers.csv`：
+`consumers.csv`（用户参数，参数导入后替换当前用户列表）：
 
 ```csv
 consumer_id,fixed_demand_mw,mode
-C1,0,piecewise
+C1,60,piecewise
+C2,40,piecewise
 ```
 
-`bids.csv`：
+`bids_generator.csv`（发电分段报价；按 `generator_id + time_slot` 分组，同组多行构成一个时段的多段报价）：
 
 ```csv
-owner_id,time_slot,segment_no,quantity_mw,price_yuan_per_mwh
-G1,0,1,20,200
-G1,0,2,30,250
+generator_id,time_slot,segment_no,quantity_mw,price_yuan_per_mwh
+G1,1,1,20,200
+G1,1,2,30,250
+G1,1,3,30,300
 ```
 
-二次模式使用 `a,b,c` 列：
+`bids_consumer.csv`（用户分段报价，结构同上）：
+
+```csv
+consumer_id,time_slot,segment_no,quantity_mw,price_yuan_per_mwh
+C1,1,1,40,270
+C1,1,2,20,250
+```
+
+约定：
+
+- `time_slot` 使用界面时段编号 `1..96`，程序内部转换为 `0..95`；
+- `quantity_mw` 表示 `Pmin` 之上的增量电量，不是累计上限；
+- `segment_no` 从 1 开始，同一主体同时段内不允许重复。
+
+二次系数 CSV 格式已预留，暂未接入界面导入：
 
 ```csv
 owner_id,time_slot,a,b,c
-G1,0,0.05,10,0
+G1,1,0.05,10,0
 ```
+
+发电阶梯报价导入或保存后，系统会按“段上边界 + 最小二乘”自动拟合出对应的二次系数并写回该机组该时段；切到二次曲线模式即可使用。`c` 固定为 0，只影响总成本展示，不影响 `Pi` 与 `λ`。
+
+用户报价文件 `bids_consumer.csv` 在二次曲线模式下作为**该时段刚性需求 `QD(slot)` 的来源**：导入 96 时段用户报价后，每个时段的 `QD` 等于该时段各用户申报段电量之和，出清电量随之逐时段变化。`consumers.csv` 中的 `fixed_demand_mw` 仅在该时段没有任何用户申报段时生效（回退值），不再覆盖已申报的时段需求。
 
 ### 8.2 SQLite 表结构
 
@@ -306,6 +337,9 @@ UI
 | 基础撮合 | 需求低于 `ΣPmin` | 判定不可行 |
 | 二次求解 | `QD` 越界 | 判定不可行 |
 | 二次求解 | 全自由、部分压上限/下限、全压界、`QD=ΣPmin`、`QD=ΣPmax` | 满足 KKT 条件，误差小于容差 |
+| 二次求解 | 逐时段申报需求驱动 `QD`：同一机组、不同时段申报需求不同 | 各时段出清电量等于该时段申报需求总量，且随 `time_slot` 变化 |
+| 二次求解 | 某时段用户无申报段 | 回退到固定需求作为 `QD`，出清电量等于固定需求 |
+| 二次求解 | 多用户同时段申报 | `QD` 等于各用户该时段申报电量之和 |
 | 结算 | 统一价格、`Pmin` 分摊 | `总支付 = 总收益`，平衡误差小于容差 |
 | 一致性 | 分段报价与等价二次曲线 | 两种模式结果一致或误差可控 |
 
@@ -324,3 +358,9 @@ UI
 | `Qtrade` | 本次成交量 | MW |
 | `k` | 时段时长 | 0.25 h |
 | `shortageMw` | 缺额 | MW |
+
+## 12. 变更记录
+
+| 日期 | 变更 | 影响 |
+| --- | --- | --- |
+| 2026-09-14 | 二次模式刚性需求由“全时段单一常数 `QD`”改为“逐时段取值”：`QD(slot)=Σ 该时段用户申报段电量`，该时段无申报段时回退到 `fixedDemand` | 二次模式出清电量随时段变化，不再恒为同一数值；`Consumer::effectiveDemandMw()` 成为唯一取值口径，`ConstraintChecker`、`QuadraticClearing`、结算与图表口径保持一致 |

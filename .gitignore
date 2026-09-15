@@ -1,0 +1,15 @@
+/build/
+/build_codex/
+/build_csv_import/
+build_csv_import/
+/.qt/
+/.qt-archives/
+/.qt-updates.xml
+/.venv/
+/aqtinstall.log
+/PowerMarketSimulation/CMakeUserPresets.json
+/.qtcreator/
+/legacy_old_project/
+*.user
+*.autosave
+*.zip

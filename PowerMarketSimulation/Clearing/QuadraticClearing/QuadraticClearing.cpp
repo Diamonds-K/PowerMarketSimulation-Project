@@ -23,6 +23,7 @@ MarketResult QuadraticClearing::clear(const MarketInput& input) {
         return buildFailure(input.timeSlot(), "QuadraticClearing 只能处理二次曲线报价模式");
     }
 
+    // 读取每台机组的二次成本参数和容量边界。
     std::vector<Unit> units;
     units.reserve(input.generators().size());
     double sumPMin = 0.0;
@@ -45,14 +46,18 @@ MarketResult QuadraticClearing::clear(const MarketInput& input) {
         units.push_back(unit);
     }
 
-    const double demand = input.totalFixedDemandMw();
+    const double demand = input.totalEffectiveDemandMw();
+    // 二次模式要求本时段刚性需求位于机组总容量范围内。
     if (demand + kTolerance < sumPMin || demand > sumPMax + kTolerance) {
         return buildFailure(input.timeSlot(),
-                            "总需求 QD 超出 [ΣPmin, ΣPmax] 范围，判定不可行");
+                            "本时段需求 QD=" + formatDouble(demand) +
+                                " 超出 [ΣPmin, ΣPmax]=[" + formatDouble(sumPMin) +
+                                ", " + formatDouble(sumPMax) + "] 范围，判定不可行");
     }
 
     double lo = std::numeric_limits<double>::infinity();
     double hi = -std::numeric_limits<double>::infinity();
+    // λ 的初始搜索区间由各机组边际成本的最小值和最大值确定。
     for (const auto& unit : units) {
         lo = std::min(lo, 2.0 * unit.a * unit.pMin + unit.b);
         hi = std::max(hi, 2.0 * unit.a * unit.pMax + unit.b);
@@ -61,6 +66,7 @@ MarketResult QuadraticClearing::clear(const MarketInput& input) {
     hi += 1.0;
 
     double lambda = 0.5 * (lo + hi);
+    // 对 λ 进行二分，直到总出力满足需求或区间足够小。
     for (int iteration = 0; iteration < kMaxIterations; ++iteration) {
         lambda = 0.5 * (lo + hi);
         const double supply = totalOutput(units, lambda);
@@ -80,6 +86,7 @@ MarketResult QuadraticClearing::clear(const MarketInput& input) {
     result.setClearingPriceYuanPerMwh(lambda);
 
     double volume = 0.0;
+    // 用最终 λ 计算每台机组的最优出力。
     for (const auto& unit : units) {
         const double output = outputForLambda(unit, lambda);
         GeneratorResult generatorResult;
@@ -94,7 +101,7 @@ MarketResult QuadraticClearing::clear(const MarketInput& input) {
     for (const auto& consumer : input.consumers()) {
         ConsumerResult consumerResult;
         consumerResult.consumerId = consumer.id();
-        consumerResult.clearedDemandMw = consumer.fixedDemandMw();
+        consumerResult.clearedDemandMw = consumer.effectiveDemandMw();
         result.addConsumerResult(consumerResult);
     }
 
@@ -107,6 +114,7 @@ std::string QuadraticClearing::modeName() const {
 }
 
 double QuadraticClearing::outputForLambda(const Unit& unit, double lambda) {
+    // 自由机组边际成本等于 λ；碰界机组夹在 Pmin 和 Pmax。
     const double output = (lambda - unit.b) / (2.0 * unit.a);
     return std::clamp(output, unit.pMin, unit.pMax);
 }
