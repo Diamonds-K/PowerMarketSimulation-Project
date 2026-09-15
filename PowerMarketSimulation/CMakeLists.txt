@@ -36,6 +36,7 @@ target_link_libraries(pms_core PUBLIC Qt6::Sql)
 
 add_executable(PowerMarketSimulation
     main.cpp
+    UI/LoginDialog/LoginDialog.cpp
     UI/MainWindow/MainWindow.cpp
     UI/GeneratorWidget/GeneratorWidget.cpp
     UI/ConsumerWidget/ConsumerWidget.cpp
